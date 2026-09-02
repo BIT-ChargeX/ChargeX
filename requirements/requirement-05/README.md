@@ -4,6 +4,15 @@
 
 处理过程：
 
-QT客户端 → 定位模块：获取当前位置 定位模块 → QT客户端：返回当前位置 QT客户端 → 充电站数据模块：获取目标充电站 充电站数据模块 → QT客户端：返回充电站经纬度 QT客户端 → 腾讯地图API：提交起点和终点 腾讯地图API → QT客户端：返回路线规划结果 QT客户端 → QWebEngineView：加载腾讯地图路线规划页面 QWebEngineView → 腾讯地图Web页面：加载/请求路线 腾讯地图Web页面 → QWebEngineView：返回地图页面 QWebEngineView → 用户：展示导航路线
+QT客户端 → 定位模块：获取当前位置
+定位模块 → QT客户端：返回当前位置 
+QT客户端 → 充电站数据模块：获取目标充电站
+充电站数据模块 → QT客户端：返回充电站经纬度 
+QT客户端 → 腾讯地图API：提交起点和终点 
+腾讯地图API → QT客户端：返回路线规划结果 
+QT客户端 → QWebEngineView：加载腾讯地图路线规划页面 
+QWebEngineView → 腾讯地图Web页面：加载/请求路线 
+腾讯地图Web页面 → QWebEngineView：返回地图页面 
+QWebEngineView → 用户：展示导航路线
 
 输出：跳转至地图路线规划页面
