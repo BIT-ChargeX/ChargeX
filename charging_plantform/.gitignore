@@ -1,0 +1,26 @@
+# 构建产物
+build/
+Debug/
+Release/
+
+# Qt Creator 工程用户配置
+*.pro.user
+*.pro.user.*
+.qmake.stash
+moc_*.cpp
+
+# 数据库文件（运行生成）
+*.db
+*.db-shm
+*.db-wal
+
+# 编译中间产物与二进制
+*.o
+*.obj
+Makefile
+ChargingServer
+ChargingAdmin
+ChargingClient
+
+# 系统文件
+.DS_Store
