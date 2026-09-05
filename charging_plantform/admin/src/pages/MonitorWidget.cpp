@@ -14,7 +14,6 @@
 #include <QSplitter>
 #include <QFrame>
 #include <QTimer>
-#include <QDateTime>
 #include <QList>
 #include <QPair>
 #include <QColor>
@@ -157,13 +156,10 @@ void MonitorWidget::refresh() {
             buildPie(inUse, idle, fault);
 
             const bool over = ratio > 20.0;
-            const QString ts = QDateTime::currentDateTime()
-                                   .toString(QStringLiteral("HH:mm:ss"));
             m_alarmLabel->setText(over
-                ? QStringLiteral("%1 · 故障预警：故障桩占比 %2%（超过 20% 阈值），请及时排查！")
-                      .arg(ts).arg(ratio, 0, 'f', 1)
-                : QStringLiteral("%1 · 运行正常：故障桩占比 %2%（阈值 20%）")
-                      .arg(ts).arg(ratio, 0, 'f', 1));
+                ? QStringLiteral("故障预警：故障桩占比 %1%（超过 20% 阈值），请及时排查！")
+                      .arg(ratio, 0, 'f', 1)
+                : QStringLiteral("运行正常：故障桩占比 %1%（阈值 20%）").arg(ratio, 0, 'f', 1));
             m_alarmLabel->setStyleSheet(over
                 ? QStringLiteral("color:#DC2626; background:#FEF2F2; padding:7px 10px;"
                                  "border-radius:6px; font-weight:600;")

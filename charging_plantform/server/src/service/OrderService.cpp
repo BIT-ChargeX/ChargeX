@@ -1,7 +1,6 @@
 #include "OrderService.h"
 #include "DbManager.h"
 #include "ApiDefs.h"
-#include "DeviceRegistry.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -193,10 +192,6 @@ Api::Reply OrderService::create(const QJsonObject& data) {
 
     db.commit();
 
-    // 通知已绑定的充电桩终端执行“上电”（未接入设备则忽略，服务器已直改库=回退）
-    DeviceRegistry::instance().enqueue(pileId, DeviceCmd::kStart,
-                                       QJsonObject{{"order_id", orderId}});
-
     QJsonObject out;
     out["order_id"] = orderId;
     out["status"] = QString(Api::OrderStatus::kCharging);
@@ -322,10 +317,6 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     pile.exec();
 
     db.commit();
-
-    // 结算完成 → 通知已绑定充电桩终端“断电释放”（未接入则忽略=回退）
-    DeviceRegistry::instance().enqueue(pileId, DeviceCmd::kStop,
-                                       QJsonObject{{"order_id", orderId}});
 
     double newBalance = balance - amount;
     {

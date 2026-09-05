@@ -6,7 +6,6 @@
 #include "service/OrderService.h"
 #include "service/AdminService.h"
 #include "service/PileService.h"
-#include "service/PileDeviceService.h"
 #include "service/SalesService.h"
 
 #include <QTcpSocket>
@@ -30,8 +29,7 @@ bool isAdminCommand(const QString& cmd) {
         || cmd == Api::CmdOpsLogList
         || cmd == Api::CmdStationMgmtList
         || cmd == Api::CmdStationMgmtAdd
-        || cmd == Api::CmdSalesSummary
-        || cmd == Api::CmdPileRuntimeLogList;
+        || cmd == Api::CmdSalesSummary;
 }
 
 QByteArray frameOf(const QJsonObject& obj) {
@@ -106,6 +104,7 @@ void ConnectionHandler::processFrames() {
 
         if (authorized) {
             if (cmd == Api::CmdUserLogin)              reply = UserService::login(data);
+            else if (cmd == Api::CmdUserSendCode)       reply = UserService::sendCode(data);
             else if (cmd == Api::CmdUserUpdateProfile) reply = UserService::updateProfile(data);
             else if (cmd == Api::CmdUserRecharge)      reply = UserService::recharge(data);
             else if (cmd == Api::CmdUserGetBalance)    reply = UserService::getBalance(data);
@@ -128,10 +127,6 @@ void ConnectionHandler::processFrames() {
             else if (cmd == Api::CmdStationMgmtList)   reply = StationService::mgmtList(data);
             else if (cmd == Api::CmdStationMgmtAdd)    reply = StationService::addStation(data);
             else if (cmd == Api::CmdSalesSummary)      reply = SalesService::summary(data);
-            else if (cmd == Api::CmdPileRuntimeLogList) reply = PileDeviceService::runtimeLogList(data);
-            else if (cmd == Api::CmdPileDevHello)      reply = PileDeviceService::hello(data);
-            else if (cmd == Api::CmdPileDevReport)     reply = PileDeviceService::report(data);
-            else if (cmd == Api::CmdPileDevResult)     reply = PileDeviceService::result(data);
             else                                       reply = Api::err(Api::NotFound, QStringLiteral("未支持的命令 %1").arg(cmd));
         }
 

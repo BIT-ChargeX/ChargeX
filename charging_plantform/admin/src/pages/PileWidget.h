@@ -4,7 +4,6 @@
 class QTableWidget;
 class QPushButton;
 class QLabel;
-class QTimer;
 
 // 需求13：充电桩管理（经协议：列表/远程重启/操作日志）
 class PileWidget : public QWidget {
@@ -26,5 +25,4 @@ private:
     QPushButton* m_rebootBtn;
     QPushButton* m_refreshBtn;
     QLabel* m_countLabel;
-    QTimer* m_timer;
 };

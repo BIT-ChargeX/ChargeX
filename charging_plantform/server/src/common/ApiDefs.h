@@ -12,6 +12,7 @@ inline constexpr const char* kDbFile = "charging_platform.db";
 // ---- 命令码 ----
 // 用户账户（对应客户端 account）
 inline constexpr const char* CmdUserLogin          = "USER_LOGIN";
+inline constexpr const char* CmdUserSendCode       = "USER_SEND_CODE";   // 发送登录验证码
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
@@ -38,13 +39,6 @@ inline constexpr const char* CmdOpsLogList       = "OPS_LOG_LIST";
 inline constexpr const char* CmdStationMgmtList  = "STATION_MGMT_LIST";
 inline constexpr const char* CmdStationMgmtAdd   = "STATION_MGMT_ADD";
 inline constexpr const char* CmdSalesSummary     = "SALES_SUMMARY";
-
-// 充电桩终端(模拟设备)接入：设备长连接，设备→服务器；控制指令经 REPORT 的 pending 回带
-inline constexpr const char* CmdPileDevHello     = "PILE_DEV_HELLO";
-inline constexpr const char* CmdPileDevReport    = "PILE_DEV_REPORT";
-inline constexpr const char* CmdPileDevResult    = "PILE_DEV_RESULT";
-// 管理端查询充电桩终端实时运行日志（需 token）
-inline constexpr const char* CmdPileRuntimeLogList = "PILE_RUNTIME_LOG_LIST";
 
 // ---- 错误码（interface_protocol.md 第4节）----
 enum ErrCode {

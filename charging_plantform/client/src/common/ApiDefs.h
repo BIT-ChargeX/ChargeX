@@ -17,8 +17,9 @@ inline constexpr const char* kTencentGeocoderUrl = "https://apis.map.qq.com/ws/g
 inline constexpr const char* kTencentRouteUrl = "https://apis.map.qq.com/uri/v1/routeplan";
 
 // ---- 命令码 ----
-// 账户（肇子杰）
+// 账户
 inline constexpr const char* CmdUserLogin          = "USER_LOGIN";
+inline constexpr const char* CmdUserSendCode       = "USER_SEND_CODE";   // 发送登录验证码
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";

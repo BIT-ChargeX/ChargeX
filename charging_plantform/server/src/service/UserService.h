@@ -6,6 +6,7 @@
 namespace UserService {
 
 Api::Reply login(const QJsonObject& data);
+Api::Reply sendCode(const QJsonObject& data);
 Api::Reply updateProfile(const QJsonObject& data);
 Api::Reply recharge(const QJsonObject& data);
 Api::Reply getBalance(const QJsonObject& data);
