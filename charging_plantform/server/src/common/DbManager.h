@@ -17,6 +17,7 @@ public:
 private:
     static void createSchema(QSqlDatabase db);
     static void seedDemo(QSqlDatabase db);
+    static void ensurePileRealtimeColumns(QSqlDatabase db);
 
     static QString s_path;
 };

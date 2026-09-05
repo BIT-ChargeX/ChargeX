@@ -8,6 +8,7 @@
 #include "pages/UserMgmtWidget.h"
 #include "pages/StationMgmtWidget.h"
 #include "pages/PileWidget.h"
+#include "pages/DeviceRuntimeWidget.h"
 
 #include <QTabWidget>
 #include <QLabel>
@@ -95,6 +96,7 @@ void MainWindow::buildTabs() {
     m_tabs->addTab(new UserMgmtWidget(m_tabs), QStringLiteral("用户管理"));
     m_tabs->addTab(new StationMgmtWidget(m_tabs), QStringLiteral("充电站管理"));
     m_tabs->addTab(new PileWidget(m_tabs), QStringLiteral("充电桩管理"));
+    m_tabs->addTab(new DeviceRuntimeWidget(m_tabs), QStringLiteral("充电桩实时运行日志"));
 }
 
 void MainWindow::onRefreshAll() {
@@ -105,6 +107,7 @@ void MainWindow::onRefreshAll() {
         else if (auto* usr = qobject_cast<UserMgmtWidget*>(w)) usr->refresh();
         else if (auto* st = qobject_cast<StationMgmtWidget*>(w)) st->refresh();
         else if (auto* pile = qobject_cast<PileWidget*>(w)) pile->refresh();
+        else if (auto* dev = qobject_cast<DeviceRuntimeWidget*>(w)) dev->refresh();
     }
     statusBar()->showMessage(QStringLiteral("已请求刷新全部页面"), 3000);
 }

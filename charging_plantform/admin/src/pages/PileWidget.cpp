@@ -12,6 +12,8 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
+#include <QTimer>
+#include <QDateTime>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QBrush>
@@ -78,6 +80,11 @@ PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
     connect(m_refreshBtn, &QPushButton::clicked, this, &PileWidget::refresh);
     connect(m_rebootBtn, &QPushButton::clicked, this, &PileWidget::onReboot);
 
+    m_timer = new QTimer(this);
+    m_timer->setInterval(3000);
+    connect(m_timer, &QTimer::timeout, this, &PileWidget::refresh);
+    m_timer->start();
+
     refresh();
 }
 
@@ -124,7 +131,10 @@ void PileWidget::loadPiles() {
                 stItem->setForeground(QBrush(Theme::statusText(status)));
                 stItem->setBackground(QBrush(Theme::statusBackground(status)));
             }
-            m_countLabel->setText(QStringLiteral("共 %1 台电桩").arg(piles.size()));
+            m_countLabel->setText(QStringLiteral("共 %1 台电桩 · %2 刷新")
+                                      .arg(piles.size())
+                                      .arg(QDateTime::currentDateTime()
+                                               .toString(QStringLiteral("HH:mm:ss"))));
         });
 }
 

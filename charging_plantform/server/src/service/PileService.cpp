@@ -1,5 +1,6 @@
 #include "PileService.h"
 #include "DbManager.h"
+#include "DeviceRegistry.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -80,6 +81,9 @@ Api::Reply PileService::reboot(const QJsonObject& data) {
     log.exec();
     db.commit();
 
+    // 通知已绑定的充电桩终端执行重启（未接入则忽略=回退）
+    DeviceRegistry::instance().enqueue(pileId, DeviceCmd::kReboot);
+
     QJsonObject out;
     out["result"] = QStringLiteral("ok");
     out["status"] = QString(Api::PileStatus::kIdle);
@@ -130,6 +134,10 @@ Api::Reply PileService::setStatus(const QJsonObject& data) {
     log.addBindValue(action);
     log.exec();
     db.commit();
+
+    // 通知已绑定的充电桩终端同步该状态设置（未接入则忽略=回退）
+    DeviceRegistry::instance().enqueue(pileId, DeviceCmd::kSetStatus,
+                                       QJsonObject{{"status", status}});
 
     QJsonObject out;
     out["result"] = QStringLiteral("ok");

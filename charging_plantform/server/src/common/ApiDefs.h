@@ -39,6 +39,13 @@ inline constexpr const char* CmdStationMgmtList  = "STATION_MGMT_LIST";
 inline constexpr const char* CmdStationMgmtAdd   = "STATION_MGMT_ADD";
 inline constexpr const char* CmdSalesSummary     = "SALES_SUMMARY";
 
+// 充电桩终端(模拟设备)接入：设备长连接，设备→服务器；控制指令经 REPORT 的 pending 回带
+inline constexpr const char* CmdPileDevHello     = "PILE_DEV_HELLO";
+inline constexpr const char* CmdPileDevReport    = "PILE_DEV_REPORT";
+inline constexpr const char* CmdPileDevResult    = "PILE_DEV_RESULT";
+// 管理端查询充电桩终端实时运行日志（需 token）
+inline constexpr const char* CmdPileRuntimeLogList = "PILE_RUNTIME_LOG_LIST";
+
 // ---- 错误码（interface_protocol.md 第4节）----
 enum ErrCode {
     LocalNetError = -1,
