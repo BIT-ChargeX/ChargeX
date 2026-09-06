@@ -19,6 +19,7 @@ inline constexpr const char* CmdPileMgmtList      = "PILE_MGMT_LIST";
 inline constexpr const char* CmdPileMgmtReboot    = "PILE_MGMT_REBOOT";
 inline constexpr const char* CmdPileMgmtSetStatus = "PILE_MGMT_SET_STATUS";
 inline constexpr const char* CmdPileMonSummary    = "PILE_MON_SUMMARY";
+inline constexpr const char* CmdPileRuntimeLogList= "PILE_RUNTIME_LOG_LIST";
 inline constexpr const char* CmdOpsLogList        = "OPS_LOG_LIST";
 inline constexpr const char* CmdStationMgmtList   = "STATION_MGMT_LIST";
 inline constexpr const char* CmdStationMgmtAdd    = "STATION_MGMT_ADD";

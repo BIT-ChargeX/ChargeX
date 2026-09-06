@@ -19,11 +19,13 @@ SOURCES += \
     src/common/TcpServer.cpp \
     src/common/ConnectionHandler.cpp \
     src/common/SessionManager.cpp \
+    src/common/DeviceRegistry.cpp \
     src/service/UserService.cpp \
     src/service/StationService.cpp \
     src/service/OrderService.cpp \
     src/service/AdminService.cpp \
     src/service/PileService.cpp \
+    src/service/PileDeviceService.cpp \
     src/service/SalesService.cpp
 
 HEADERS += \
@@ -33,9 +35,11 @@ HEADERS += \
     src/common/TcpServer.h \
     src/common/ConnectionHandler.h \
     src/common/SessionManager.h \
+    src/common/DeviceRegistry.h \
     src/service/UserService.h \
     src/service/StationService.h \
     src/service/OrderService.h \
     src/service/AdminService.h \
     src/service/PileService.h \
+    src/service/PileDeviceService.h \
     src/service/SalesService.h

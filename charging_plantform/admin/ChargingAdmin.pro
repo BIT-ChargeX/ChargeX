@@ -23,6 +23,7 @@ SOURCES += \
     src/pages/UserMgmtWidget.cpp \
     src/pages/StationMgmtWidget.cpp \
     src/pages/PileWidget.cpp \
+    src/pages/DeviceRuntimeWidget.cpp \
     src/pages/MonitorWidget.cpp \
     src/pages/SalesWidget.cpp
 
@@ -37,5 +38,6 @@ HEADERS += \
     src/pages/UserMgmtWidget.h \
     src/pages/StationMgmtWidget.h \
     src/pages/PileWidget.h \
+    src/pages/DeviceRuntimeWidget.h \
     src/pages/MonitorWidget.h \
     src/pages/SalesWidget.h
