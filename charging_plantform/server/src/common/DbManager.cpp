@@ -11,6 +11,7 @@
 #include <QRandomGenerator>
 #include <QDateTime>
 #include <QTime>
+#include <QSet>
 
 QString DbManager::s_path = QString(Api::kDbFile);
 
@@ -44,7 +45,29 @@ void DbManager::init(const QString& dbPath) {
     q.exec(QStringLiteral("PRAGMA foreign_keys = ON;"));
 
     createSchema(db);
+    ensurePileRealtimeColumns(db);
     seedDemo(db);
+}
+
+// 为 piles 表补充“实时遥测”列（充电桩终端上报字段）；幂等，老库无需重建
+void DbManager::ensurePileRealtimeColumns(QSqlDatabase db) {
+    QSet<QString> cols;
+    {
+        QSqlQuery q(db);
+        q.exec(QStringLiteral("PRAGMA table_info(piles);"));
+        while (q.next()) cols.insert(q.value(1).toString());
+    }
+    struct Add { const char* name; const char* ddl; };
+    const Add adds[] = {
+        {"last_report", "ALTER TABLE piles ADD COLUMN last_report DATETIME"},
+        {"soc", "ALTER TABLE piles ADD COLUMN soc INTEGER"},
+        {"cur_power_kw", "ALTER TABLE piles ADD COLUMN cur_power_kw REAL"},
+    };
+    QSqlQuery q(db);
+    for (const auto& a : adds) {
+        if (cols.contains(QString::fromLatin1(a.name))) continue;
+        q.exec(QString::fromLatin1(a.ddl));
+    }
 }
 
 void DbManager::createSchema(QSqlDatabase db) {
@@ -115,6 +138,21 @@ void DbManager::createSchema(QSqlDatabase db) {
                 action    VARCHAR(64) DEFAULT '',
                 op_time   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );)SQL"),
+        // 充电桩终端实时运行事件（设备上线/状态变化/指令回执，事件级，避免逐心跳灌水）
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS pile_runtime_log (
+                log_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                device_id     VARCHAR(32) DEFAULT '',
+                pile_id       INTEGER NOT NULL DEFAULT 0,
+                code          VARCHAR(32) DEFAULT '',
+                event         VARCHAR(32) DEFAULT '',
+                status        VARCHAR(8)  DEFAULT '',
+                soc           INTEGER,
+                cur_power_kw  REAL,
+                detail        VARCHAR(128) DEFAULT ''
+            );)SQL"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_prl_id ON pile_runtime_log(log_id DESC);"),
         // 默认管理员
         QStringLiteral("INSERT OR IGNORE INTO admins (account, password, name) "
                        "VALUES ('admin', '123456', '系统管理员');"),
