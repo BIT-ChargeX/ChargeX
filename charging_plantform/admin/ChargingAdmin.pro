@@ -20,6 +20,7 @@ SOURCES += \
     src/common/AdminSession.cpp \
     src/common/Theme.cpp \
     src/common/SimpleCharts.cpp \
+    src/common/NavRail.cpp \
     src/pages/UserMgmtWidget.cpp \
     src/pages/StationMgmtWidget.cpp \
     src/pages/PileWidget.cpp \
@@ -35,6 +36,7 @@ HEADERS += \
     src/common/AdminSession.h \
     src/common/Theme.h \
     src/common/SimpleCharts.h \
+    src/common/NavRail.h \
     src/pages/UserMgmtWidget.h \
     src/pages/StationMgmtWidget.h \
     src/pages/PileWidget.h \

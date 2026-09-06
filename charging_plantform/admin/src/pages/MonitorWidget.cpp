@@ -25,8 +25,8 @@ QLabel* makeStatCard(const QString& caption, const QString& accentName,
     auto* box = new QFrame(parent);
     box->setObjectName(QStringLiteral("statCard%1").arg(accentName));
     auto* v = new QVBoxLayout(box);
-    v->setContentsMargins(16, 12, 16, 12);
-    v->setSpacing(2);
+    v->setContentsMargins(18, 16, 18, 16);
+    v->setSpacing(4);
     auto* value = new QLabel(QStringLiteral("-"), box);
     value->setObjectName(QStringLiteral("statValue"));
     auto* cap = new QLabel(caption, box);
@@ -75,7 +75,7 @@ MonitorWidget::MonitorWidget(QWidget* parent) : QWidget(parent) {
     m_chartArea = new QFrame(splitter);
     m_chartArea->setObjectName(QStringLiteral("card"));
     auto* cv = new QVBoxLayout(m_chartArea);
-    cv->setContentsMargins(10, 8, 10, 8);
+    cv->setContentsMargins(16, 12, 16, 12);
     auto* chartTitle = new QLabel(QStringLiteral("状态分布（饼图）"), m_chartArea);
     chartTitle->setObjectName(QStringLiteral("sectionTitle"));
     cv->addWidget(chartTitle);
@@ -120,9 +120,7 @@ void MonitorWidget::refresh() {
         [this](const QJsonObject& d, int code, const QString& msg) {
             if (code != 0) {
                 m_alarmLabel->setText(QStringLiteral("加载失败：%1").arg(msg));
-                m_alarmLabel->setStyleSheet(QStringLiteral("color:#DC2626; background:#FEF2F2;"
-                                                           "padding:7px 10px; border-radius:6px;"
-                                                           "font-weight:600;"));
+                m_alarmLabel->setStyleSheet(Theme::alarmQss(false));
                 return;
             }
             const int total = d.value("total").toInt();
@@ -160,10 +158,6 @@ void MonitorWidget::refresh() {
                 ? QStringLiteral("故障预警：故障桩占比 %1%（超过 20% 阈值），请及时排查！")
                       .arg(ratio, 0, 'f', 1)
                 : QStringLiteral("运行正常：故障桩占比 %1%（阈值 20%）").arg(ratio, 0, 'f', 1));
-            m_alarmLabel->setStyleSheet(over
-                ? QStringLiteral("color:#DC2626; background:#FEF2F2; padding:7px 10px;"
-                                 "border-radius:6px; font-weight:600;")
-                : QStringLiteral("color:#15803D; background:#F0FDF4; padding:7px 10px;"
-                                 "border-radius:6px; font-weight:600;"));
+            m_alarmLabel->setStyleSheet(Theme::alarmQss(!over));
         });
 }

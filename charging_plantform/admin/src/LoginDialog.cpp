@@ -2,6 +2,7 @@
 #include "common/NetClient.h"
 #include "common/AdminSession.h"
 #include "common/ApiDefs.h"
+#include "common/Theme.h"
 
 #include <QLineEdit>
 #include <QPushButton>
@@ -12,7 +13,7 @@
 
 LoginDialog::LoginDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(QStringLiteral("充电桩运营管理 - PC管理端登录"));
-    setFixedSize(760, 430);
+    setFixedSize(820, 470);
 
     auto* root = new QHBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -41,8 +42,8 @@ LoginDialog::LoginDialog(QWidget* parent) : QDialog(parent) {
 
     auto* form = new QWidget(this);
     auto* fv = new QVBoxLayout(form);
-    fv->setContentsMargins(44, 40, 44, 36);
-    fv->setSpacing(6);
+    fv->setContentsMargins(48, 44, 48, 40);
+    fv->setSpacing(7);
 
     auto* formTitle = new QLabel(QStringLiteral("管理员登录"), form);
     formTitle->setObjectName(QStringLiteral("pageTitle"));
@@ -62,7 +63,7 @@ LoginDialog::LoginDialog(QWidget* parent) : QDialog(parent) {
     fv->addWidget(accLabel);
     m_accountEdit = new QLineEdit(form);
     m_accountEdit->setPlaceholderText(QStringLiteral("管理员账号"));
-    m_accountEdit->setFixedHeight(36);
+    m_accountEdit->setFixedHeight(40);
     fv->addWidget(m_accountEdit);
     fv->addSpacing(6);
 
@@ -72,18 +73,19 @@ LoginDialog::LoginDialog(QWidget* parent) : QDialog(parent) {
     m_passwordEdit = new QLineEdit(form);
     m_passwordEdit->setPlaceholderText(QStringLiteral("密码"));
     m_passwordEdit->setEchoMode(QLineEdit::Password);
-    m_passwordEdit->setFixedHeight(36);
+    m_passwordEdit->setFixedHeight(40);
     fv->addWidget(m_passwordEdit);
     fv->addSpacing(14);
 
     m_loginBtn = new QPushButton(QStringLiteral("登  录"), form);
     m_loginBtn->setObjectName(QStringLiteral("btnPrimary"));
-    m_loginBtn->setFixedHeight(40);
+    m_loginBtn->setFixedHeight(44);
     fv->addWidget(m_loginBtn);
 
     m_hintLabel = new QLabel(form);
     m_hintLabel->setWordWrap(true);
-    m_hintLabel->setStyleSheet(QStringLiteral("color:#DC2626; font-size:12px;"));
+    m_hintLabel->setStyleSheet(QStringLiteral("color:%1; font-size:12px;")
+                                   .arg(Theme::danger().name()));
     fv->addWidget(m_hintLabel);
 
     fv->addStretch(1);
@@ -111,15 +113,15 @@ void LoginDialog::onNetStateChanged(int state) {
     switch (state) {
     case static_cast<int>(NetClient::State::Connected):
         m_connLabel->setText(QStringLiteral("已连接服务器"));
-        m_connLabel->setStyleSheet(QStringLiteral("color:#15803D;"));
+        m_connLabel->setStyleSheet(QStringLiteral("color:%1;").arg(Theme::success().name()));
         break;
     case static_cast<int>(NetClient::State::Connecting):
         m_connLabel->setText(QStringLiteral("正在连接服务器…"));
-        m_connLabel->setStyleSheet(QStringLiteral("color:#475569;"));
+        m_connLabel->setStyleSheet(QStringLiteral("color:%1;").arg(Theme::textSecondary().name()));
         break;
     default:
         m_connLabel->setText(QStringLiteral("未连接服务器，请先启动 ChargingServer"));
-        m_connLabel->setStyleSheet(QStringLiteral("color:#B91C1C;"));
+        m_connLabel->setStyleSheet(QStringLiteral("color:%1;").arg(Theme::danger().name()));
         break;
     }
 }
