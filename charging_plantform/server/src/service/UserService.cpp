@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QDebug>
+#include <cmath>
 
 namespace {
 
@@ -190,18 +191,54 @@ Api::Reply UserService::updateProfile(const QJsonObject& data) {
     return Api::okData(out);
 }
 
+// 【需求7 - 余额充值】校验金额合法性（>0、有限、不超过单笔限额）→ 模拟支付成功 →
+// 余额累加 + 充值记录写入同一事务，保证账户数据一致性。
 Api::Reply UserService::recharge(const QJsonObject& data) {
     const int userId = data.value("user_id").toInt();
     const double amount = data.value("amount").toDouble();
-    if (userId <= 0 || amount <= 0) return Api::err(Api::InvalidParam, QStringLiteral("参数不合法"));
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+    if (!std::isfinite(amount) || amount <= 0) {
+        return Api::err(Api::InvalidParam, QStringLiteral("充值金额不合法"));
+    }
 
     QSqlDatabase db = DbManager::threadDb();
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral("UPDATE users SET balance = balance + ? WHERE user_id = ?;"));
-    q.addBindValue(amount);
-    q.addBindValue(userId);
-    if (!q.exec()) return Api::err(Api::ServerError, q.lastError().text());
-    if (q.numRowsAffected() == 0) return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+
+    // 单笔限额（可在系统配置表中调整）
+    const double limit = configDouble(db, QStringLiteral("recharge_limit"), 5000.0);
+    if (amount > limit) {
+        return Api::err(Api::InvalidParam,
+                        QStringLiteral("超过单笔限额 ¥%1").arg(limit, 0, 'f', 2));
+    }
+
+    // 余额更新 + 充值记录写入同一事务
+    db.transaction();
+
+    QSqlQuery upd(db);
+    upd.prepare(QStringLiteral("UPDATE users SET balance = balance + ? WHERE user_id = ?;"));
+    upd.addBindValue(amount);
+    upd.addBindValue(userId);
+    if (!upd.exec()) {
+        db.rollback();
+        return Api::err(Api::ServerError, upd.lastError().text());
+    }
+    if (upd.numRowsAffected() == 0) {
+        db.rollback();
+        return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+    }
+
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO recharge_record (user_id, amount, pay_method) VALUES (?,?,?);"));
+    ins.addBindValue(userId);
+    ins.addBindValue(amount);
+    ins.addBindValue(QStringLiteral("模拟支付"));
+    if (!ins.exec()) {
+        db.rollback();
+        return Api::err(Api::ServerError, ins.lastError().text());
+    }
+    const int rechargeId = ins.lastInsertId().toInt();
+
+    db.commit();
 
     QSqlQuery sel(db);
     sel.prepare(QStringLiteral("SELECT balance FROM users WHERE user_id = ?;"));
@@ -210,6 +247,35 @@ Api::Reply UserService::recharge(const QJsonObject& data) {
 
     QJsonObject out;
     out["balance"] = sel.value(0).toDouble();
+    out["recharge_id"] = rechargeId;
+    return Api::okData(out);
+}
+
+// 【充值记录查询】返回该用户最近的充值记录（供用户后续查询）
+Api::Reply UserService::rechargeRecords(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT recharge_id, amount, pay_method, created_at FROM recharge_record "
+        "WHERE user_id = ? ORDER BY recharge_id DESC LIMIT 100;"));
+    q.addBindValue(userId);
+    if (!q.exec()) return Api::err(Api::ServerError, q.lastError().text());
+
+    QJsonArray items;
+    while (q.next()) {
+        QJsonObject it;
+        it["recharge_id"] = q.value(0).toInt();
+        it["amount"]      = q.value(1).toDouble();
+        it["pay_method"]  = q.value(2).toString();
+        it["time"]        = fmtTime(q.value(3).toString());
+        items.append(it);
+    }
+
+    QJsonObject out;
+    out["items"] = items;
     return Api::okData(out);
 }
 

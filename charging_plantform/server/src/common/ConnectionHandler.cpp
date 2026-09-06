@@ -108,6 +108,7 @@ void ConnectionHandler::processFrames() {
             if (cmd == Api::CmdUserLogin)              reply = UserService::login(data);
             else if (cmd == Api::CmdUserUpdateProfile) reply = UserService::updateProfile(data);
             else if (cmd == Api::CmdUserRecharge)      reply = UserService::recharge(data);
+            else if (cmd == Api::CmdUserRechargeRecords) reply = UserService::rechargeRecords(data);
             else if (cmd == Api::CmdUserGetBalance)    reply = UserService::getBalance(data);
             else if (cmd == Api::CmdUserCarbonStats)   reply = UserService::carbonStats(data);
             else if (cmd == Api::CmdUserPointsDetail)  reply = UserService::pointsDetail(data);
