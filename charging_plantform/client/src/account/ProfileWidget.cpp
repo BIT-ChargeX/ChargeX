@@ -1,5 +1,6 @@
 #include "ProfileWidget.h"
 #include "PointsWidget.h"
+#include "charging/OrderListWidget.h"
 #include "common/AppSession.h"
 #include "common/NetClient.h"
 #include "common/ApiDefs.h"
@@ -18,6 +19,10 @@
 #include <QColor>
 #include <QJsonObject>
 #include <QMessageBox>
+#include <QFile>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QUrl>
 
 namespace {
 
@@ -105,6 +110,12 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
         "text-align: left; padding: 10px; color: #2e7d32; font-weight: bold;"));
     layout->addWidget(m_pointsBtn);
 
+    // 我的充电订单：查看全部订单 + 结算未完成订单（从充电页迁入）
+    m_ordersBtn = new QPushButton(QStringLiteral("我的充电订单  ›"), this);
+    m_ordersBtn->setStyleSheet(QStringLiteral(
+        "text-align: left; padding: 10px; color: #1565c0; font-weight: bold;"));
+    layout->addWidget(m_ordersBtn);
+
     m_hintLabel = new QLabel(this);
     m_hintLabel->setStyleSheet(QStringLiteral("color: #d9534f;"));
     m_hintLabel->setWordWrap(true);
@@ -117,12 +128,15 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
     layout->addWidget(m_logoutBtn);
 
     m_pointsWidget = new PointsWidget(this);
+    m_orderList = new OrderListWidget(this);
 
     connect(m_changeAvatarBtn, &QPushButton::clicked, this, &ProfileWidget::onChooseAvatar);
     connect(m_saveBtn, &QPushButton::clicked, this, &ProfileWidget::onSaveProfile);
     connect(m_rechargeBtn, &QPushButton::clicked, this, &ProfileWidget::requestRecharge);
     connect(m_logoutBtn, &QPushButton::clicked, this, &ProfileWidget::onLogoutClicked);
     connect(m_pointsBtn, &QPushButton::clicked, this, &ProfileWidget::onPointsClicked);
+    connect(m_ordersBtn, &QPushButton::clicked, this, &ProfileWidget::onOrdersClicked);
+    connect(m_orderList, &OrderListWidget::settleRequested, this, &ProfileWidget::settleRequested);
 
     connect(&AppSession::instance(), &AppSession::balanceChanged, this, &ProfileWidget::onBalanceChanged);
     connect(&AppSession::instance(), &AppSession::loginChanged, this, &ProfileWidget::onLoginChanged);
@@ -138,16 +152,35 @@ void ProfileWidget::applySession() {
     AppSession& s = AppSession::instance();
 
     const QString& avatar = s.avatar();
-    QPixmap pm;
-    if (!avatar.isEmpty() && pm.load(avatar)) {
-        setAvatarPixmap(pm);
+    if (avatar.startsWith(QStringLiteral("http://"))
+        || avatar.startsWith(QStringLiteral("https://"))) {
+        downloadAvatar(avatar);
     } else {
-        setAvatarPixmap(defaultAvatarPixmap());
+        QPixmap pm;
+        if (!avatar.isEmpty() && pm.load(avatar)) {
+            setAvatarPixmap(pm);
+        } else {
+            setAvatarPixmap(defaultAvatarPixmap());
+        }
     }
     m_phoneLabel->setText(s.phone());
     m_nicknameEdit->setText(s.nickname());
     m_balanceLabel->setText(QStringLiteral("¥%1").arg(s.balance(), 0, 'f', 2));
     m_pendingAvatarPath.clear();
+}
+
+void ProfileWidget::downloadAvatar(const QString& url) {
+    auto* nam = new QNetworkAccessManager(this);
+    QNetworkReply* reply = nam->get(QNetworkRequest(QUrl(url)));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        QPixmap pm;
+        if (reply->error() == QNetworkReply::NoError && pm.loadFromData(reply->readAll())) {
+            setAvatarPixmap(pm);
+        } else {
+            setAvatarPixmap(defaultAvatarPixmap());
+        }
+        reply->deleteLater();
+    });
 }
 
 void ProfileWidget::onLoginChanged() {
@@ -178,6 +211,18 @@ void ProfileWidget::onPointsClicked() {
     m_pointsWidget->show();
     m_pointsWidget->raise();
     m_pointsWidget->activateWindow();
+}
+
+void ProfileWidget::onOrdersClicked() {
+    if (!AppSession::instance().isLoggedIn()) return;
+    m_orderList->refresh();
+    m_orderList->show();
+    m_orderList->raise();
+    m_orderList->activateWindow();
+}
+
+void ProfileWidget::refreshOrders() {
+    if (AppSession::instance().isLoggedIn()) m_orderList->refresh();
 }
 
 void ProfileWidget::refresh() {
@@ -247,16 +292,26 @@ void ProfileWidget::onChooseAvatar() {
     m_pendingAvatarPath = path;
     setAvatarPixmap(pm);
 
-    // 选择即上传（协议 v1.0 avatar 为路径字符串；生产环境应上传至对象存储换取 URL，跨机显示受限见 README 说明）
+    // 读取文件字节 -> base64 -> 上传 MinIO 对象存储，换取跨设备可访问的公开 URL
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        m_hintLabel->setText(QStringLiteral("图片读取失败"));
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    file.close();
+
     QJsonObject data;
     data["user_id"] = AppSession::instance().userId();
-    data["avatar_url"] = path;
-    NetClient::instance().sendRequest(Api::CmdUserUpdateProfile, data,
+    data["file_name"] = QFileInfo(path).fileName();
+    data["data_b64"] = QString::fromLatin1(bytes.toBase64());
+
+    NetClient::instance().sendRequest(Api::CmdAvatarUpload, data,
         [this](const QJsonObject& resp, int code, const QString& msg) {
             if (code == 0) {
                 AppSession::instance().setAvatar(resp.value("avatar").toString());
                 m_hintLabel->setStyleSheet(QStringLiteral("color: #2e7d32;"));
-                m_hintLabel->setText(QStringLiteral("头像已更新"));
+                m_hintLabel->setText(QStringLiteral("头像已上传"));
             } else {
                 m_hintLabel->setStyleSheet(QStringLiteral("color: #d9534f;"));
                 m_hintLabel->setText(QStringLiteral("头像上传失败：%1").arg(msg));

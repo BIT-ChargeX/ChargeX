@@ -6,6 +6,7 @@ class QLineEdit;
 class QPushButton;
 class QPixmap;
 class PointsWidget;
+class OrderListWidget;
 
 // 账户模块-需求6：用户个人信息维护（头像/昵称/余额/碳积分/环保足迹）
 // 负责人：肇子杰   命令：USER_UPDATE_PROFILE / USER_GET_BALANCE / USER_CARBON_STATS
@@ -17,9 +18,11 @@ public:
     // 切到本页时调用，刷新余额等实时数据
     void refresh();
     void setAvatarPixmap(const QPixmap& pm);
+    void refreshOrders();   // 结算完成后刷新"我的订单"列表
 
 signals:
     void requestRecharge();   // 交给主页弹出充值页
+    void settleRequested(int orderId);   // 请求结算未完成订单
     void logoutRequested();   // 退出登录
 
 private slots:
@@ -30,9 +33,11 @@ private slots:
     void onLoginChanged();
     void onLoggedOut();
     void onPointsClicked();
+    void onOrdersClicked();
 
 private:
     void applySession();
+    void downloadAvatar(const QString& url);
     void resetEcoFootprint();
 
     QLabel* m_avatarLabel;
@@ -50,8 +55,10 @@ private:
     QLabel* m_treesLabel;
     QLabel* m_levelLabel;
     QPushButton* m_pointsBtn;
+    QPushButton* m_ordersBtn;
 
     PointsWidget* m_pointsWidget;
+    OrderListWidget* m_orderList;
 
     QString m_pendingAvatarPath;
 };

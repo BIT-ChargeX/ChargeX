@@ -110,6 +110,7 @@ void ConnectionHandler::processFrames() {
             else if (cmd == Api::CmdUserRecharge)      reply = UserService::recharge(data);
             else if (cmd == Api::CmdUserRechargeRecords) reply = UserService::rechargeRecords(data);
             else if (cmd == Api::CmdUserGetBalance)    reply = UserService::getBalance(data);
+            else if (cmd == Api::CmdAvatarUpload)      reply = UserService::uploadAvatar(data);
             else if (cmd == Api::CmdUserCarbonStats)   reply = UserService::carbonStats(data);
             else if (cmd == Api::CmdUserPointsDetail)  reply = UserService::pointsDetail(data);
             else if (cmd == Api::CmdUserPointsRedeem)  reply = UserService::redeemPoints(data);
@@ -120,6 +121,7 @@ void ConnectionHandler::processFrames() {
             else if (cmd == Api::CmdOrderReserve)      reply = OrderService::reserve(data);
             else if (cmd == Api::CmdOrderCreate)       reply = OrderService::create(data);
             else if (cmd == Api::CmdOrderSettle)       reply = OrderService::settle(data);
+            else if (cmd == Api::CmdOrderList)         reply = OrderService::listOrders(data);
             else if (cmd == Api::CmdAdminLogin)        reply = AdminService::login(data);
             else if (cmd == Api::CmdAdminLogout)       reply = AdminService::logout(data);
             else if (cmd == Api::CmdUserList)          reply = AdminService::userList(data);

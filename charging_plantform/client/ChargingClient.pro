@@ -31,7 +31,8 @@ SOURCES += \
     src/station_nav/StationDetailWidget.cpp \
     src/station_nav/NavWidget.cpp \
     src/charging/ChargingFlowWidget.cpp \
-    src/charging/SettlementWidget.cpp
+    src/charging/SettlementWidget.cpp \
+    src/charging/OrderListWidget.cpp
 
 HEADERS += \
     src/HomeWindow.h \
@@ -48,4 +49,5 @@ HEADERS += \
     src/station_nav/StationDetailWidget.h \
     src/station_nav/NavWidget.h \
     src/charging/ChargingFlowWidget.h \
-    src/charging/SettlementWidget.h
+    src/charging/SettlementWidget.h \
+    src/charging/OrderListWidget.h

@@ -1,5 +1,6 @@
 #include "UserService.h"
 #include "DbManager.h"
+#include "MinioClient.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -188,6 +189,50 @@ Api::Reply UserService::updateProfile(const QJsonObject& data) {
     QJsonObject out;
     out["nickname"] = nickname;
     out["avatar"] = avatar;
+    return Api::okData(out);
+}
+
+// 【需求6 - 头像上传】客户端 base64 图片 → 上传 MinIO 对象存储 → 回传公开 URL 并写入 users.avatar_url。
+// 相比存本地路径，URL 跨设备可访问（MinIO 公共桶直连）。
+Api::Reply UserService::uploadAvatar(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    const QString b64 = data.value("data_b64").toString();
+    const QString fileName = data.value("file_name").toString();
+    if (userId <= 0 || b64.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("参数不合法"));
+
+    const QByteArray bytes = QByteArray::fromBase64(b64.toLatin1());
+    if (bytes.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("图片数据为空"));
+
+    QString ext = QStringLiteral("png");
+    QString contentType = QStringLiteral("image/png");
+    if (fileName.endsWith(QStringLiteral(".jpg"), Qt::CaseInsensitive)
+        || fileName.endsWith(QStringLiteral(".jpeg"), Qt::CaseInsensitive)) {
+        ext = QStringLiteral("jpg"); contentType = QStringLiteral("image/jpeg");
+    } else if (fileName.endsWith(QStringLiteral(".bmp"), Qt::CaseInsensitive)) {
+        ext = QStringLiteral("bmp"); contentType = QStringLiteral("image/bmp");
+    } else if (fileName.endsWith(QStringLiteral(".gif"), Qt::CaseInsensitive)) {
+        ext = QStringLiteral("gif"); contentType = QStringLiteral("image/gif");
+    }
+
+    const QString objectKey = QStringLiteral("avatar/%1_%2.%3")
+        .arg(userId).arg(QDateTime::currentMSecsSinceEpoch()).arg(ext);
+
+    QString url;
+    if (!MinioClient::upload(objectKey, bytes, contentType, &url)) {
+        return Api::err(Api::ServerError, QStringLiteral("头像上传失败"));
+    }
+
+    QSqlDatabase db = DbManager::threadDb();
+    QSqlQuery upd(db);
+    upd.prepare(QStringLiteral("UPDATE users SET avatar_url = ? WHERE user_id = ?;"));
+    upd.addBindValue(url);
+    upd.addBindValue(userId);
+    if (!upd.exec() || upd.numRowsAffected() == 0) {
+        return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+    }
+
+    QJsonObject out;
+    out["avatar"] = url;
     return Api::okData(out);
 }
 

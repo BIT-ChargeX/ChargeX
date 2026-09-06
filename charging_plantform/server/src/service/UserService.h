@@ -7,6 +7,7 @@ namespace UserService {
 
 Api::Reply login(const QJsonObject& data);
 Api::Reply updateProfile(const QJsonObject& data);
+Api::Reply uploadAvatar(const QJsonObject& data);   // 头像上传：base64 -> MinIO -> 存 URL
 Api::Reply recharge(const QJsonObject& data);
 Api::Reply rechargeRecords(const QJsonObject& data); // 充值记录查询
 Api::Reply getBalance(const QJsonObject& data);

@@ -42,6 +42,7 @@ QLabel* makeStatCard(const QString& caption, const QString& accentName,
     cap->setObjectName(QStringLiteral("statCaption"));
     v->addWidget(value);
     v->addWidget(cap);
+
     v->addSpacing(2);
     if (footer) {
         v->addWidget(footer);

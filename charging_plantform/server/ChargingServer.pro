@@ -19,6 +19,8 @@ SOURCES += \
     src/common/ConnectionHandler.cpp \
     src/common/SessionManager.cpp \
     src/common/DeviceRegistry.cpp \
+    src/common/InfluxClient.cpp \
+    src/common/MinioClient.cpp \
     src/service/UserService.cpp \
     src/service/StationService.cpp \
     src/service/OrderService.cpp \
@@ -34,6 +36,9 @@ HEADERS += \
     src/common/ConnectionHandler.h \
     src/common/SessionManager.h \
     src/common/DeviceRegistry.h \
+    src/common/HttpSync.h \
+    src/common/InfluxClient.h \
+    src/common/MinioClient.h \
     src/service/UserService.h \
     src/service/StationService.h \
     src/service/OrderService.h \
