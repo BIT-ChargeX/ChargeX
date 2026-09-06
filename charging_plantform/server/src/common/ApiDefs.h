@@ -11,8 +11,7 @@ inline constexpr const char* kDbFile = "charging_platform.db";
 
 // ---- 命令码 ----
 // 用户账户（对应客户端 account）
-inline constexpr const char* CmdUserLogin          = "USER_LOGIN";
-inline constexpr const char* CmdUserSendCode       = "USER_SEND_CODE";   // 发送登录验证码
+inline constexpr const char* CmdUserLogin          = "USER_LOGIN";   // 手机号+密码登录（首次登录自动注册）
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";

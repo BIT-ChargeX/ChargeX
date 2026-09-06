@@ -20,8 +20,7 @@ inline constexpr const char* kTencentSuggestionUrl = "https://apis.map.qq.com/ws
 
 // ---- 命令码 ----
 // 账户
-inline constexpr const char* CmdUserLogin          = "USER_LOGIN";
-inline constexpr const char* CmdUserSendCode       = "USER_SEND_CODE";   // 发送登录验证码
+inline constexpr const char* CmdUserLogin          = "USER_LOGIN";   // 手机号+密码登录（首次登录自动注册）
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
