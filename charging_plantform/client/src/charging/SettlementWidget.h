@@ -16,6 +16,7 @@ public:
 
 signals:
     void requestRecharge();
+    void settled();   // 结算成功后发出，供外部刷新订单列表/充电页
 
 private slots:
     void onSettleClicked();

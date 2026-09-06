@@ -7,6 +7,7 @@
 #include <QSqlError>
 #include <QVariant>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QDateTime>
 #include <cmath>
 
@@ -340,5 +341,48 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     out["status"] = QString(Api::OrderStatus::kDone);
     out["amount"] = amount;
     out["balance"] = newBalance;
+    return Api::okData(out);
+}
+
+Api::Reply OrderService::listOrders(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(R"SQL(
+        SELECT o.order_id, o.pile_id, o.reserve_time, o.start_time, o.end_time,
+               o.amount, o.status, o.created_at,
+               p.code, p.type, p.power_kw,
+               s.station_id, s.name AS station_name
+        FROM orders o
+        JOIN piles p ON p.pile_id = o.pile_id
+        LEFT JOIN stations s ON s.station_id = p.station_id
+        WHERE o.user_id = ?
+        ORDER BY o.order_id DESC;)SQL"));
+    q.addBindValue(userId);
+    if (!q.exec()) return Api::err(Api::ServerError, q.lastError().text());
+
+    QJsonArray orders;
+    while (q.next()) {
+        QJsonObject o;
+        o["order_id"]     = q.value(0).toInt();
+        o["pile_id"]      = q.value(1).toInt();
+        o["reserve_time"] = q.value(2).toString();
+        o["start_time"]   = q.value(3).toString();
+        o["end_time"]     = q.value(4).toString();
+        o["amount"]       = q.value(5).toDouble();
+        o["status"]       = q.value(6).toString();
+        o["created_at"]   = q.value(7).toString();
+        o["pile_code"]    = q.value(8).toString();
+        o["type"]         = q.value(9).toString();
+        o["power_kw"]     = q.value(10).toDouble();
+        o["station_id"]   = q.value(11).toInt();
+        o["station_name"] = q.value(12).toString();
+        orders.append(o);
+    }
+
+    QJsonObject out;
+    out["orders"] = orders;
     return Api::okData(out);
 }

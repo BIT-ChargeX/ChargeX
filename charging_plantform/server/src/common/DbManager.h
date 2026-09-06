@@ -14,9 +14,13 @@ public:
 
     static QString dbPath();
 
+    // 密码哈希：SHA-256(固定盐 + 明文)，登录/注册统一调用，保证口径一致
+    static QString hashPassword(const QString& plain);
+
 private:
     static void createSchema(QSqlDatabase db);
     static void ensurePileRealtimeColumns(QSqlDatabase db);
+    static void ensurePasswordColumn(QSqlDatabase db);
     static void seedDemo(QSqlDatabase db);
 
     static QString s_path;

@@ -10,7 +10,6 @@
 
 #include <QTabWidget>
 #include <QVBoxLayout>
-#include <QMessageBox>
 #include <QJsonObject>
 
 namespace {
@@ -64,13 +63,17 @@ HomeWindow::HomeWindow(QWidget* parent) : QWidget(parent) {
     connect(m_charging, &ChargingFlowWidget::goPickPileRequested, this,
             [this]() { m_tabs->setCurrentIndex(TabFindPile); });
 
-    // 有未完成订单：弹窗 + 强制进入结算页（需求8）
-    connect(m_charging, &ChargingFlowWidget::orderInterrupted, this,
-            [this](int orderId) {
-                QMessageBox::warning(this, QStringLiteral("提示"),
-                                     QStringLiteral("您有未完成的充电订单，请先结算"));
-                m_settlement->openWithOrder(orderId);
-            });
+    // 结算入口：充电页快捷按钮 / 我的-我的订单列表，统一打开结算页
+    connect(m_charging, &ChargingFlowWidget::settleRequested,
+            m_settlement, &SettlementWidget::openWithOrder);
+    connect(m_profile, &ProfileWidget::settleRequested,
+            m_settlement, &SettlementWidget::openWithOrder);
+
+    // 结算完成后刷新订单列表，并让充电页重新检测未完成订单
+    connect(m_settlement, &SettlementWidget::settled, this, [this]() {
+        m_profile->refreshOrders();
+        m_charging->onTabEntered();
+    });
 
     // 结算页去充值 / 我的页充值
     connect(m_settlement, &SettlementWidget::requestRecharge, this,

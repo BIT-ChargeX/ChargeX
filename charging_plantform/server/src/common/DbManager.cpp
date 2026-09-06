@@ -12,10 +12,19 @@
 #include <QDateTime>
 #include <QTime>
 #include <QSet>
+#include <QCryptographicHash>
 
 QString DbManager::s_path = QString(Api::kDbFile);
 
 QString DbManager::dbPath() { return s_path; }
+
+// 密码哈希：SHA-256(固定盐 + 明文)。课程演示用简化方案，
+// 生产环境应改用 PBKDF2/bcrypt 等慢哈希 + 每用户随机盐。
+QString DbManager::hashPassword(const QString& plain) {
+    static const QByteArray kSalt = "ChargeX_Salt_2026";
+    return QString::fromLatin1(
+        QCryptographicHash::hash(kSalt + plain.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
 
 QString uniqueConnName() {
     return QStringLiteral("conn_%1_%2")
@@ -46,6 +55,7 @@ void DbManager::init(const QString& dbPath) {
 
     createSchema(db);
     ensurePileRealtimeColumns(db);
+    ensurePasswordColumn(db);   // 兼容旧库：给 users 表补 password 列
     seedDemo(db);
 }
 
@@ -70,6 +80,23 @@ void DbManager::ensurePileRealtimeColumns(QSqlDatabase db) {
     }
 }
 
+// 兼容旧库迁移：users 表若缺少 password 列则补上（SQLite 的 ALTER TABLE 不支持 IF NOT EXISTS）
+void DbManager::ensurePasswordColumn(QSqlDatabase db) {
+    QSqlQuery q(db);
+    q.exec(QStringLiteral("PRAGMA table_info(users);"));
+    bool has = false;
+    while (q.next()) {
+        if (q.value(1).toString() == QStringLiteral("password")) { has = true; break; }
+    }
+    if (!has) {
+        QSqlQuery alt(db);
+        if (!alt.exec(QStringLiteral(
+                "ALTER TABLE users ADD COLUMN password VARCHAR(64) NOT NULL DEFAULT '';"))) {
+            qWarning() << "[DbManager] 添加 password 列失败:" << alt.lastError().text();
+        }
+    }
+}
+
 void DbManager::createSchema(QSqlDatabase db) {
     QSqlQuery q(db);
     const QStringList ddl = {
@@ -81,6 +108,7 @@ void DbManager::createSchema(QSqlDatabase db) {
                 nickname    VARCHAR(32) NOT NULL,
                 avatar_url  VARCHAR(255) DEFAULT '',
                 balance     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                password    VARCHAR(64) NOT NULL DEFAULT '',
                 status      INTEGER NOT NULL DEFAULT 1,
                 reg_time    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );)SQL"),
@@ -153,6 +181,42 @@ void DbManager::createSchema(QSqlDatabase db) {
                 detail        VARCHAR(128) DEFAULT ''
             );)SQL"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_prl_id ON pile_runtime_log(log_id DESC);"),
+        // 系统配置表（减排系数等可调参数，需求：系数可在配置表中调整）
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS sys_config (
+                cfg_key   VARCHAR(64) PRIMARY KEY,
+                cfg_value VARCHAR(64) NOT NULL,
+                remark    VARCHAR(128) DEFAULT ''
+            );)SQL"),
+        // 碳积分兑换记录表
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS points_redemption (
+                redeem_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER NOT NULL REFERENCES users(user_id),
+                points         INTEGER NOT NULL,
+                item_id        VARCHAR(32) DEFAULT '',
+                item_name      VARCHAR(64) DEFAULT '',
+                item_type      VARCHAR(16) DEFAULT 'coupon',
+                balance_credit DECIMAL(10,2) NOT NULL DEFAULT 0,
+                created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );)SQL"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_redemption_user ON points_redemption(user_id);"),
+        // 充值记录表（供用户后续查询，支付方式为模拟支付）
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS recharge_record (
+                recharge_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(user_id),
+                amount      DECIMAL(10,2) NOT NULL,
+                pay_method  VARCHAR(32) NOT NULL DEFAULT '模拟支付',
+                created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );)SQL"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_recharge_user ON recharge_record(user_id);"),
+        // 播种默认系统配置（幂等）
+        QStringLiteral("INSERT OR IGNORE INTO sys_config (cfg_key, cfg_value, remark) VALUES "
+                       "('carbon_factor','0.785','每充1度电相对燃油车减少的碳排放 kg'),"
+                       "('tree_factor','18.0','一棵成年树年吸收CO2 kg'),"
+                       "('points_factor','1.0','每充1度电积分数'),"
+                       "('recharge_limit','5000.0','单笔充值限额(元)');"),
         // 默认管理员
         QStringLiteral("INSERT OR IGNORE INTO admins (account, password, name) "
                        "VALUES ('admin', '123456', '系统管理员');"),
@@ -175,17 +239,20 @@ void DbManager::seedDemo(QSqlDatabase db) {
     q.exec(QStringLiteral("SELECT COUNT(*) FROM users;"));
     if (q.next() && q.value(0).toInt() == 0) {
         q.prepare(QStringLiteral(
-            "INSERT INTO users (phone, nickname, avatar_url, balance, status) "
-            "VALUES (?, ?, '', ?, 1);"));
+            "INSERT INTO users (phone, nickname, avatar_url, balance, password, status) "
+            "VALUES (?, ?, '', ?, ?, 1);"));
         const QList<QPair<QString, double>> demoUsers = {
             {QStringLiteral("13800001111"), 66.00},
             {QStringLiteral("13900002222"), 20.50},
             {QStringLiteral("13700003333"), 0.00},
         };
+        // 演示用户统一密码 123456，方便测试"已注册账号"登录
+        const QString demoPass = DbManager::hashPassword(QStringLiteral("123456"));
         for (const auto& u : demoUsers) {
             q.addBindValue(u.first);
             q.addBindValue(QStringLiteral("用户%1").arg(u.first.right(4)));
             q.addBindValue(u.second);
+            q.addBindValue(demoPass);
             q.exec();
         }
     }

@@ -18,11 +18,15 @@ inline constexpr const char* kTencentRouteUrl = "https://apis.map.qq.com/uri/v1/
 
 // ---- 命令码 ----
 // 账户
-inline constexpr const char* CmdUserLogin          = "USER_LOGIN";
-inline constexpr const char* CmdUserSendCode       = "USER_SEND_CODE";   // 发送登录验证码
+inline constexpr const char* CmdUserLogin          = "USER_LOGIN";   // 手机号+密码登录（首次登录自动注册）
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
+inline constexpr const char* CmdAvatarUpload       = "AVATAR_UPLOAD";   // 头像上传：base64 图片 -> 服务端 -> MinIO
+inline constexpr const char* CmdUserRechargeRecords= "USER_RECHARGE_RECORDS"; // 充值记录查询
+inline constexpr const char* CmdUserCarbonStats    = "USER_CARBON_STATS";    // 碳积分与环保足迹
+inline constexpr const char* CmdUserPointsDetail   = "USER_POINTS_DETAIL";   // 积分明细列表
+inline constexpr const char* CmdUserPointsRedeem   = "USER_POINTS_REDEEM";   // 积分兑换
 // 充电站 / 电桩（刘恩东）
 inline constexpr const char* CmdStationNearby      = "STATION_NEARBY";
 inline constexpr const char* CmdStationDetail      = "STATION_DETAIL";
@@ -32,6 +36,7 @@ inline constexpr const char* CmdOrderCheckUnfinished = "ORDER_CHECK_UNFINISHED";
 inline constexpr const char* CmdOrderReserve          = "ORDER_RESERVE";
 inline constexpr const char* CmdOrderCreate           = "ORDER_CREATE";
 inline constexpr const char* CmdOrderSettle           = "ORDER_SETTLE";
+inline constexpr const char* CmdOrderList             = "ORDER_LIST";   // 我的订单：查询用户全部充电订单
 // 注：ORDER_SETTLE 结算/扣费/释放电桩的业务逻辑在服务端（OrderService::settle）
 // 结算命令 ORDER_SETTLE 协议 v1.1 尚未冻结，冻结前服务端不会响应，客户端不主动发送。
 

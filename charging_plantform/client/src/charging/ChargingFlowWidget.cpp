@@ -10,26 +10,28 @@
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QFont>
+#include <QMessageBox>
 
 ChargingFlowWidget::ChargingFlowWidget(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
-    layout->setSpacing(12);
+    layout->setSpacing(14);
+    layout->setContentsMargins(28, 24, 28, 24);
 
     auto* title = new QLabel(QStringLiteral("电动汽车充电"), this);
     QFont f = title->font();
-    f.setPointSize(15);
+    f.setPointSize(16);
     f.setBold(true);
     title->setFont(f);
     layout->addWidget(title);
 
-    m_statusLabel = new QLabel(QStringLiteral("进入充电页后请先检查未完成订单"), this);
+    m_statusLabel = new QLabel(QStringLiteral("进入充电页后会自动检测未完成订单"), this);
     m_statusLabel->setWordWrap(true);
     layout->addWidget(m_statusLabel);
 
-    m_pileLabel = new QLabel(QStringLiteral("未选择电桩"), this);
-    m_pileLabel->setStyleSheet(QStringLiteral("background: #f5f5f5; padding: 8px;"
-                                              "border: 1px solid #e0e0e0; border-radius: 6px;"));
+    m_pileLabel = new QLabel(QStringLiteral("尚未选择电桩"), this);
     m_pileLabel->setWordWrap(true);
+    m_pileLabel->setStyleSheet(QStringLiteral("background: #eef4ff; padding: 12px;"
+                                              "border: 1px solid #cfe0ff; border-radius: 6px;"));
     layout->addWidget(m_pileLabel);
 
     auto* slotRow = new QHBoxLayout;
@@ -42,32 +44,39 @@ ChargingFlowWidget::ChargingFlowWidget(QWidget* parent) : QWidget(parent) {
     slotRow->addWidget(m_timeSlotCombo, 1);
     layout->addLayout(slotRow);
 
-    m_checkBtn = new QPushButton(QStringLiteral("检查未完成订单"), this);
-    layout->addWidget(m_checkBtn);
-
     m_reserveBtn = new QPushButton(QStringLiteral("预约并开始充电"), this);
     m_reserveBtn->setEnabled(false);
-    m_reserveBtn->setFixedHeight(42);
+    m_reserveBtn->setFixedHeight(46);
+    m_reserveBtn->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #2e7d32; color: white; border-radius: 6px;"
+        " font-size: 15px; font-weight: bold; }"
+        "QPushButton:disabled { background: #bdbdbd; }"));
     layout->addWidget(m_reserveBtn);
 
-    m_settlementBtn = new QPushButton(QStringLiteral("我的充电订单 / 结算"), this);
-    layout->addWidget(m_settlementBtn);
+    m_settleBtn = new QPushButton(this);
+    m_settleBtn->setFixedHeight(40);
+    m_settleBtn->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #fff3e0; color: #c62828; border: 1px solid #ffcc80;"
+        " border-radius: 6px; font-weight: bold; }"));
+    m_settleBtn->hide();
+    layout->addWidget(m_settleBtn);
 
-    m_goPickPileBtn = new QPushButton(QStringLiteral("去'找桩'页选择电桩"), this);
+    m_goPickPileBtn = new QPushButton(QStringLiteral("去「找桩」页选择电桩"), this);
     layout->addWidget(m_goPickPileBtn);
 
     layout->addStretch(1);
 
-    connect(m_checkBtn, &QPushButton::clicked, this, &ChargingFlowWidget::checkUnfinishedOrder);
     connect(m_reserveBtn, &QPushButton::clicked, this, &ChargingFlowWidget::onReserveClicked);
-    connect(m_settlementBtn, &QPushButton::clicked, this, &ChargingFlowWidget::checkUnfinishedOrder);
+    connect(m_settleBtn, &QPushButton::clicked, this, &ChargingFlowWidget::onSettleClicked);
     connect(m_goPickPileBtn, &QPushButton::clicked, this, &ChargingFlowWidget::goPickPile);
 
     // 退出登录后清理选桩与状态，避免历史用户残留
     connect(&AppSession::instance(), &AppSession::loggedOut, this, [this]() {
         m_pendingPile = QJsonObject();
+        m_unfinishedOrderId = 0;
         m_reserveBtn->setEnabled(false);
-        m_pileLabel->setText(QStringLiteral("未选择电桩"));
+        m_settleBtn->hide();
+        m_pileLabel->setText(QStringLiteral("尚未选择电桩"));
         m_statusLabel->clear();
     });
 }
@@ -91,14 +100,14 @@ void ChargingFlowWidget::onTabEntered() {
 void ChargingFlowWidget::startChargingWithPile(const QJsonObject& pile) {
     m_pendingPile = pile;
 
-    const QString pileDesc = QStringLiteral("已选电桩：%1（%2/%3）@ %4")
+    const QString pileDesc = QStringLiteral("已选电桩：编号 %1（%2 · %3kW）\n站点：%4")
         .arg(pile.value("pile_id").toInt())
         .arg(pile.value("type").toString())
         .arg(pile.value("power").toDouble())
         .arg(pile.value("station_name").toString());
     m_pileLabel->setText(pileDesc);
     m_reserveBtn->setEnabled(true);
-    setStatus(QStringLiteral("电桩已选择，请先确认无未完成订单，再点击“预约并开始充电”。"), true);
+    setStatus(QStringLiteral("电桩已选好，确认时段后点击「预约并开始充电」。"), true);
 }
 
 void ChargingFlowWidget::checkUnfinishedOrder() {
@@ -120,33 +129,57 @@ void ChargingFlowWidget::checkUnfinishedOrder() {
                 setStatus(QStringLiteral("订单检测失败：%1").arg(msg), false);
                 return;
             }
-            bool has = resp.value("has_unfinished").toBool();
+            const bool has = resp.value("has_unfinished").toBool();
             if (has) {
-                int orderId = resp.value("order_id").toInt();
-                setStatus(QStringLiteral("您有未完成的充电订单（单号 %1），请先结算。")
-                              .arg(orderId), false);
-                m_reserveBtn->setEnabled(false);
-                emit orderInterrupted(orderId);
+                m_unfinishedOrderId = resp.value("order_id").toInt();
+                setStatus(QStringLiteral("您有未完成的充电订单（单号 #%1），请先结算后再开始新的充电。")
+                              .arg(m_unfinishedOrderId), false);
+                m_reserveBtn->setEnabled(!m_pendingPile.isEmpty());
+                m_settleBtn->setText(QStringLiteral("结算"));
+                m_settleBtn->show();
             } else {
+                m_unfinishedOrderId = 0;
+                m_settleBtn->hide();
                 setStatus(QStringLiteral("无未完成订单，可以开始新的充电。"), true);
                 m_reserveBtn->setEnabled(!m_pendingPile.isEmpty());
             }
         });
 }
 
+void ChargingFlowWidget::onSettleClicked() {
+    if (m_unfinishedOrderId <= 0) return;
+    emit settleRequested(m_unfinishedOrderId);
+}
+
 void ChargingFlowWidget::onReserveClicked() {
     if (m_pendingPile.isEmpty()) {
-        setStatus(QStringLiteral("请先在“找桩”页选择一个空闲电桩"), false);
+        setStatus(QStringLiteral("请先在「找桩」页选择一个空闲电桩"), false);
         return;
     }
     if (!AppSession::instance().isLoggedIn()) return;
+
+    // 有未结算订单时点击"开始充电"：弹窗提醒，引导先结算
+    if (m_unfinishedOrderId > 0) {
+        QMessageBox box(QMessageBox::Warning, QStringLiteral("有未结算订单"),
+            QStringLiteral("您有一笔未结算的充电订单（单号 #%1），请先结算后再开始新的充电。")
+                .arg(m_unfinishedOrderId),
+            QMessageBox::NoButton, this);
+        QPushButton* settleBtn = box.addButton(QStringLiteral("去结算"), QMessageBox::AcceptRole);
+        box.addButton(QStringLiteral("取消"), QMessageBox::RejectRole);
+        box.exec();
+        if (box.clickedButton() == settleBtn) {
+            emit settleRequested(m_unfinishedOrderId);
+        }
+        return;
+    }
+
     if (m_busy) {
         setStatus(QStringLiteral("正在处理中，请稍候…"), false);
         return;
     }
 
     // 业务判定（未完成订单/电桩是否可用）由服务端 ORDER_RESERVE 权威处理，
-    // 客户端只发送“预约意图”，冲突以服务端返回为准。
+    // 客户端只发送"预约意图"，冲突以服务端返回为准。
     doReserve();
 }
 
@@ -183,16 +216,19 @@ void ChargingFlowWidget::createOrder(int pileId) {
     data["pile_id"] = pileId;
 
     NetClient::instance().sendRequest(Api::CmdOrderCreate, data,
-        [this, pileId](const QJsonObject& resp, int code, const QString& msg) {
+        [this](const QJsonObject& resp, int code, const QString& msg) {
             m_busy = false;
             if (code != 0) {
                 setStatus(QStringLiteral("生成订单失败：%1").arg(msg), false);
                 m_reserveBtn->setEnabled(true);
                 return;
             }
-            int orderId = resp.value("order_id").toInt();
-            setStatus(QStringLiteral("订单已生成（单号 %1），电桩开始充电，当前为【待结算】状态。"
-                                     "充电完成后请到“结算”页面完成支付结算。").arg(orderId), true);
+            const int orderId = resp.value("order_id").toInt();
+            m_unfinishedOrderId = orderId;
             m_reserveBtn->setEnabled(false);
+            setStatus(QStringLiteral("订单已生成（单号 #%1），电桩开始充电，当前为【待结算】状态。"
+                                     "充电完成后点击下方按钮完成结算。").arg(orderId), true);
+            m_settleBtn->setText(QStringLiteral("结算"));
+            m_settleBtn->show();
         });
 }

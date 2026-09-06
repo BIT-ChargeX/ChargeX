@@ -1,6 +1,6 @@
 #include "UserService.h"
 #include "DbManager.h"
-#include "AliyunSms.h"
+#include "MinioClient.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -8,12 +8,9 @@
 #include <QRegularExpression>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QHash>
-#include <QMutex>
-#include <QMutexLocker>
 #include <QDateTime>
-#include <QRandomGenerator>
 #include <QDebug>
+#include <cmath>
 
 namespace {
 
@@ -22,110 +19,136 @@ bool validPhone(const QString& p) {
     return re.match(p).hasMatch();
 }
 
-// 按手机号查询用户；不存在返回 -1
-int findUserIdByPhone(QSqlDatabase& db, const QString& phone, bool* frozen = nullptr) {
+// 从系统配置表读取数值型配置，缺失/非法时回退默认值
+double configDouble(QSqlDatabase& db, const QString& key, double fallback) {
     QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT user_id, status FROM users WHERE phone = ?;"));
-    q.addBindValue(phone);
+    q.prepare(QStringLiteral("SELECT cfg_value FROM sys_config WHERE cfg_key = ?;"));
+    q.addBindValue(key);
     if (q.exec() && q.next()) {
-        if (frozen) *frozen = (q.value(1).toInt() == 0);
-        return q.value(0).toInt();
+        bool ok = false;
+        const double v = q.value(0).toString().toDouble(&ok);
+        if (ok) return v;
     }
-    return -1;
+    return fallback;
 }
 
-} // namespace
+// 环保等级/称号（按累计碳积分划分）
+QString ecoLevel(int points) {
+    if (points >= 3000) return QStringLiteral("碳中和卫士");
+    if (points >= 1000) return QStringLiteral("环保达人");
+    if (points >= 500)  return QStringLiteral("低碳先锋");
+    if (points >= 100)  return QStringLiteral("绿色出行者");
+    return QStringLiteral("环保新秀");
+}
 
-namespace {
+// 时间格式化：ISO -> yyyy-MM-dd HH:mm:ss
+QString fmtTime(const QString& iso) {
+    const QDateTime dt = QDateTime::fromString(iso, Qt::ISODate);
+    return dt.isValid() ? dt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : iso;
+}
 
-// 验证码存储：内存保存，5 分钟有效 + 一次性使用（服务重启即失效）。
-struct SmsCode {
-    QString code;
-    QDateTime expiresAt;
+// 用户累计充电量(kWh)：已完成订单 = 桩功率(kW) × 充电时长(小时)
+double userEnergy(QSqlDatabase& db, int userId) {
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(R"SQL(
+        SELECT COALESCE(SUM(
+                 p.power_kw *
+                 (julianday(o.end_time) - julianday(o.start_time)) * 24.0), 0.0)
+        FROM orders o JOIN piles p ON p.pile_id = o.pile_id
+        WHERE o.user_id = ? AND o.status = ?;)SQL"));
+    q.addBindValue(userId);
+    q.addBindValue(QString(Api::OrderStatus::kDone));
+    if (!q.exec()) return 0.0;
+    return q.next() ? q.value(0).toDouble() : 0.0;
+}
+
+// 用户已兑换积分总数
+int spentPoints(QSqlDatabase& db, int userId) {
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT COALESCE(SUM(points),0) FROM points_redemption WHERE user_id = ?;"));
+    q.addBindValue(userId);
+    if (q.exec() && q.next()) return q.value(0).toInt();
+    return 0;
+}
+
+// 可兑换项目（兑换优惠券 / 抵扣充电费用）
+struct RedeemItem {
+    QString id;
+    QString name;
+    QString type;   // "coupon" 优惠券 / "deduct" 抵扣充电费用(转余额)
+    int cost;       // 所需积分
+    double value;   // 面值/抵扣金额（元）
 };
-QHash<QString, SmsCode> g_smsCodes;   // phone -> 验证码
-QMutex g_smsCodesMutex;
 
-QString generateSmsCode(const QString& phone) {
-    QString code;
-    auto* rnd = QRandomGenerator::global();
-    for (int i = 0; i < 6; ++i) code += QString::number(rnd->bounded(10));
-    QMutexLocker lock(&g_smsCodesMutex);
-    g_smsCodes[phone] = SmsCode{code, QDateTime::currentDateTime().addSecs(5 * 60)};
-    return code;
-}
-
-// 校验并消耗验证码（一次性）：成功移除；不存在/过期/不匹配返回 false。
-bool consumeSmsCode(const QString& phone, const QString& code) {
-    QMutexLocker lock(&g_smsCodesMutex);
-    auto it = g_smsCodes.constFind(phone);
-    if (it == g_smsCodes.constEnd()) return false;
-    if (QDateTime::currentDateTime() > it.value().expiresAt) {
-        g_smsCodes.remove(phone);
-        return false;
+const RedeemItem* findRedeemItem(const QString& id) {
+    static const RedeemItem items[] = {
+        {QStringLiteral("coupon_5"),  QStringLiteral("满10减5元优惠券"),  QStringLiteral("coupon"), 100, 5.0},
+        {QStringLiteral("coupon_10"), QStringLiteral("满20减10元优惠券"), QStringLiteral("coupon"), 200, 10.0},
+        {QStringLiteral("coupon_30"), QStringLiteral("满50减30元优惠券"), QStringLiteral("coupon"), 500, 30.0},
+        {QStringLiteral("deduct_5"),  QStringLiteral("充电费抵扣 ¥5"),   QStringLiteral("deduct"), 100, 5.0},
+        {QStringLiteral("deduct_20"), QStringLiteral("充电费抵扣 ¥20"),  QStringLiteral("deduct"), 400, 20.0},
+    };
+    for (const auto& it : items) {
+        if (it.id == id) return &it;
     }
-    if (it.value().code != code) return false;
-    g_smsCodes.remove(phone);
-    return true;
+    return nullptr;
 }
 
 } // namespace
 
-Api::Reply UserService::sendCode(const QJsonObject& data) {
-    const QString phone = data.value("phone").toString();
-    if (!validPhone(phone)) return Api::err(Api::InvalidParam, QStringLiteral("手机号格式不正确"));
-
-    const QString code = generateSmsCode(phone);
-    QString err;
-    if (!AliyunSms::send(phone, code, &err)) {
-        // 发送失败不落库：用户收不到验证码，也就无法用该验证码登录
-        QMutexLocker lock(&g_smsCodesMutex);
-        g_smsCodes.remove(phone);
-        return Api::err(Api::ServerError, QStringLiteral("短信发送失败：%1").arg(err));
-    }
-
-    qInfo().noquote() << QStringLiteral("[短信] 已向 %1 发送登录验证码").arg(phone);
-    return Api::ok();
-}
-
+// 【需求1 - 手机号+密码登录】处理 USER_LOGIN：
+// 1) 校验手机号格式与密码非空；
+// 2) 按手机号查用户：已存在且被冻结 -> 拒绝；密码不匹配 -> 拒绝；
+// 3) 未注册 -> 自动创建账号（首次登录自动注册，密码存哈希）；
+// 4) 返回用户信息，客户端据此进入主页。
 Api::Reply UserService::login(const QJsonObject& data) {
     const QString phone = data.value("phone").toString();
-    const QString code = data.value("code").toString();
+    const QString password = data.value("password").toString();
     if (!validPhone(phone)) return Api::err(Api::InvalidParam, QStringLiteral("手机号格式不正确"));
-    if (!consumeSmsCode(phone, code))
-        return Api::err(Api::InvalidParam, QStringLiteral("验证码错误或已过期"));
+    if (password.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("请输入密码"));
 
     QSqlDatabase db = DbManager::threadDb();
-    bool frozen = false;
-    int userId = findUserIdByPhone(db, phone, &frozen);
-    if (userId >= 0 && frozen) {
-        return Api::err(Api::StateConflict, QStringLiteral("账号已被冻结，请联系客服"));
+    const QString hash = DbManager::hashPassword(password);
+
+    // 查是否已注册，顺带取回冻结状态与密码哈希
+    int userId = -1;
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT user_id, status, password FROM users WHERE phone = ?;"));
+    q.addBindValue(phone);
+    if (q.exec() && q.next()) {
+        userId = q.value(0).toInt();
+        if (q.value(1).toInt() == 0)   // status=0 表示冻结
+            return Api::err(Api::StateConflict, QStringLiteral("账号已被冻结，请联系客服"));
+        if (q.value(2).toString() != hash)
+            return Api::err(Api::InvalidParam, QStringLiteral("密码错误"));
     }
 
+    // 未注册 -> 自动创建账号（首次登录自动注册）
     if (userId < 0) {
-        // 首次登录自动注册：默认昵称"用户+手机号后4位"
         QSqlQuery ins(db);
         ins.prepare(QStringLiteral(
-            "INSERT INTO users (phone, nickname, avatar_url, balance, status) VALUES (?,?,?,0,1);"));
+            "INSERT INTO users (phone, nickname, avatar_url, balance, password, status) "
+            "VALUES (?,?,?,0,?,1);"));
         ins.addBindValue(phone);
         ins.addBindValue(QStringLiteral("用户%1").arg(phone.right(4)));
         ins.addBindValue(QString());
+        ins.addBindValue(hash);
         if (!ins.exec()) return Api::err(Api::ServerError, ins.lastError().text());
         userId = ins.lastInsertId().toInt();
     }
 
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral(
-        "SELECT nickname, avatar_url, balance FROM users WHERE user_id = ?;"));
-    q.addBindValue(userId);
-    if (!q.exec() || !q.next()) return Api::err(Api::ServerError, QStringLiteral("查询用户失败"));
+    // 返回用户信息
+    QSqlQuery sel(db);
+    sel.prepare(QStringLiteral("SELECT nickname, avatar_url, balance FROM users WHERE user_id = ?;"));
+    sel.addBindValue(userId);
+    if (!sel.exec() || !sel.next()) return Api::err(Api::ServerError, QStringLiteral("查询用户失败"));
 
     QJsonObject out;
     out["user_id"] = userId;
     out["phone"] = phone;
-    out["nickname"] = q.value(0).toString();
-    out["avatar"] = q.value(1).toString();
-    out["balance"] = q.value(2).toDouble();
+    out["nickname"] = sel.value(0).toString();
+    out["avatar"] = sel.value(1).toString();
+    out["balance"] = sel.value(2).toDouble();
     return Api::okData(out);
 }
 
@@ -140,6 +163,9 @@ Api::Reply UserService::updateProfile(const QJsonObject& data) {
 
     if (!hasNickname && !hasAvatar) {
         return Api::err(Api::InvalidParam, QStringLiteral("没有需要修改的内容"));
+    }
+    if (hasNickname && newNickname.trimmed().length() > 32) {
+        return Api::err(Api::InvalidParam, QStringLiteral("昵称长度不能超过 32 个字符"));
     }
 
     QSqlDatabase db = DbManager::threadDb();
@@ -166,18 +192,98 @@ Api::Reply UserService::updateProfile(const QJsonObject& data) {
     return Api::okData(out);
 }
 
+// 【需求6 - 头像上传】客户端 base64 图片 → 上传 MinIO 对象存储 → 回传公开 URL 并写入 users.avatar_url。
+// 相比存本地路径，URL 跨设备可访问（MinIO 公共桶直连）。
+Api::Reply UserService::uploadAvatar(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    const QString b64 = data.value("data_b64").toString();
+    const QString fileName = data.value("file_name").toString();
+    if (userId <= 0 || b64.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("参数不合法"));
+
+    const QByteArray bytes = QByteArray::fromBase64(b64.toLatin1());
+    if (bytes.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("图片数据为空"));
+
+    QString ext = QStringLiteral("png");
+    QString contentType = QStringLiteral("image/png");
+    if (fileName.endsWith(QStringLiteral(".jpg"), Qt::CaseInsensitive)
+        || fileName.endsWith(QStringLiteral(".jpeg"), Qt::CaseInsensitive)) {
+        ext = QStringLiteral("jpg"); contentType = QStringLiteral("image/jpeg");
+    } else if (fileName.endsWith(QStringLiteral(".bmp"), Qt::CaseInsensitive)) {
+        ext = QStringLiteral("bmp"); contentType = QStringLiteral("image/bmp");
+    } else if (fileName.endsWith(QStringLiteral(".gif"), Qt::CaseInsensitive)) {
+        ext = QStringLiteral("gif"); contentType = QStringLiteral("image/gif");
+    }
+
+    const QString objectKey = QStringLiteral("avatar/%1_%2.%3")
+        .arg(userId).arg(QDateTime::currentMSecsSinceEpoch()).arg(ext);
+
+    QString url;
+    if (!MinioClient::upload(objectKey, bytes, contentType, &url)) {
+        return Api::err(Api::ServerError, QStringLiteral("头像上传失败"));
+    }
+
+    QSqlDatabase db = DbManager::threadDb();
+    QSqlQuery upd(db);
+    upd.prepare(QStringLiteral("UPDATE users SET avatar_url = ? WHERE user_id = ?;"));
+    upd.addBindValue(url);
+    upd.addBindValue(userId);
+    if (!upd.exec() || upd.numRowsAffected() == 0) {
+        return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+    }
+
+    QJsonObject out;
+    out["avatar"] = url;
+    return Api::okData(out);
+}
+
+// 【需求7 - 余额充值】校验金额合法性（>0、有限、不超过单笔限额）→ 模拟支付成功 →
+// 余额累加 + 充值记录写入同一事务，保证账户数据一致性。
 Api::Reply UserService::recharge(const QJsonObject& data) {
     const int userId = data.value("user_id").toInt();
     const double amount = data.value("amount").toDouble();
-    if (userId <= 0 || amount <= 0) return Api::err(Api::InvalidParam, QStringLiteral("参数不合法"));
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+    if (!std::isfinite(amount) || amount <= 0) {
+        return Api::err(Api::InvalidParam, QStringLiteral("充值金额不合法"));
+    }
 
     QSqlDatabase db = DbManager::threadDb();
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral("UPDATE users SET balance = balance + ? WHERE user_id = ?;"));
-    q.addBindValue(amount);
-    q.addBindValue(userId);
-    if (!q.exec()) return Api::err(Api::ServerError, q.lastError().text());
-    if (q.numRowsAffected() == 0) return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+
+    // 单笔限额（可在系统配置表中调整）
+    const double limit = configDouble(db, QStringLiteral("recharge_limit"), 5000.0);
+    if (amount > limit) {
+        return Api::err(Api::InvalidParam,
+                        QStringLiteral("超过单笔限额 ¥%1").arg(limit, 0, 'f', 2));
+    }
+
+    // 余额更新 + 充值记录写入同一事务
+    db.transaction();
+
+    QSqlQuery upd(db);
+    upd.prepare(QStringLiteral("UPDATE users SET balance = balance + ? WHERE user_id = ?;"));
+    upd.addBindValue(amount);
+    upd.addBindValue(userId);
+    if (!upd.exec()) {
+        db.rollback();
+        return Api::err(Api::ServerError, upd.lastError().text());
+    }
+    if (upd.numRowsAffected() == 0) {
+        db.rollback();
+        return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+    }
+
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO recharge_record (user_id, amount, pay_method) VALUES (?,?,?);"));
+    ins.addBindValue(userId);
+    ins.addBindValue(amount);
+    ins.addBindValue(QStringLiteral("模拟支付"));
+    if (!ins.exec()) {
+        db.rollback();
+        return Api::err(Api::ServerError, ins.lastError().text());
+    }
+    const int rechargeId = ins.lastInsertId().toInt();
+
+    db.commit();
 
     QSqlQuery sel(db);
     sel.prepare(QStringLiteral("SELECT balance FROM users WHERE user_id = ?;"));
@@ -186,6 +292,35 @@ Api::Reply UserService::recharge(const QJsonObject& data) {
 
     QJsonObject out;
     out["balance"] = sel.value(0).toDouble();
+    out["recharge_id"] = rechargeId;
+    return Api::okData(out);
+}
+
+// 【充值记录查询】返回该用户最近的充值记录（供用户后续查询）
+Api::Reply UserService::rechargeRecords(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT recharge_id, amount, pay_method, created_at FROM recharge_record "
+        "WHERE user_id = ? ORDER BY recharge_id DESC LIMIT 100;"));
+    q.addBindValue(userId);
+    if (!q.exec()) return Api::err(Api::ServerError, q.lastError().text());
+
+    QJsonArray items;
+    while (q.next()) {
+        QJsonObject it;
+        it["recharge_id"] = q.value(0).toInt();
+        it["amount"]      = q.value(1).toDouble();
+        it["pay_method"]  = q.value(2).toString();
+        it["time"]        = fmtTime(q.value(3).toString());
+        items.append(it);
+    }
+
+    QJsonObject out;
+    out["items"] = items;
     return Api::okData(out);
 }
 
@@ -201,5 +336,160 @@ Api::Reply UserService::getBalance(const QJsonObject& data) {
 
     QJsonObject out;
     out["balance"] = q.value(0).toDouble();
+    return Api::okData(out);
+}
+
+// 【碳积分与环保足迹】根据历史已完成订单实时计算：
+//   减碳量 = 累计充电量 × carbon_factor
+//   等效植树 = 减碳量 ÷ tree_factor
+//   碳积分 = 累计充电量 × points_factor（再减去已兑换积分）
+Api::Reply UserService::carbonStats(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    const double energy = userEnergy(db, userId);
+
+    const double carbonFactor = configDouble(db, QStringLiteral("carbon_factor"), 0.785);
+    const double treeFactor   = configDouble(db, QStringLiteral("tree_factor"), 18.0);
+    const double pointsFactor = configDouble(db, QStringLiteral("points_factor"), 1.0);
+
+    const double carbon = energy * carbonFactor;
+    const double trees  = treeFactor > 0 ? carbon / treeFactor : 0.0;
+    const int earned    = qRound(energy * pointsFactor);
+    const int points    = earned - spentPoints(db, userId);
+
+    QJsonObject out;
+    out["energy_kwh"] = energy;
+    out["carbon_kg"]  = carbon;
+    out["trees"]      = trees;
+    out["points"]     = points;
+    out["level"]      = ecoLevel(points);
+    return Api::okData(out);
+}
+
+// 【积分明细】合并"充电所得(+)"与"兑换支出(-)"两类记录
+Api::Reply UserService::pointsDetail(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    const double pointsFactor = configDouble(db, QStringLiteral("points_factor"), 1.0);
+
+    QJsonArray items;
+    int earned = 0;
+
+    // 充电所得
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(R"SQL(
+        SELECT o.order_id, o.end_time,
+               p.power_kw * (julianday(o.end_time) - julianday(o.start_time)) * 24.0 AS energy
+        FROM orders o JOIN piles p ON p.pile_id = o.pile_id
+        WHERE o.user_id = ? AND o.status = ?
+        ORDER BY o.order_id DESC;)SQL"));
+    q.addBindValue(userId);
+    q.addBindValue(QString(Api::OrderStatus::kDone));
+    if (!q.exec()) return Api::err(Api::ServerError, q.lastError().text());
+    while (q.next()) {
+        const int pts = qRound(q.value(2).toDouble() * pointsFactor);
+        if (pts <= 0) continue;
+        earned += pts;
+        QJsonObject it;
+        it["type"]   = QStringLiteral("充电");
+        it["source"] = QStringLiteral("订单 #%1").arg(q.value(0).toInt());
+        it["time"]   = fmtTime(q.value(1).toString());
+        it["points"] = pts;
+        items.append(it);
+    }
+
+    // 兑换支出
+    int spent = 0;
+    QSqlQuery r(db);
+    r.prepare(QStringLiteral("SELECT points, item_name, created_at FROM points_redemption "
+                             "WHERE user_id = ? ORDER BY redeem_id DESC;"));
+    r.addBindValue(userId);
+    if (!r.exec()) return Api::err(Api::ServerError, r.lastError().text());
+    while (r.next()) {
+        const int pts = r.value(0).toInt();
+        spent += pts;
+        QJsonObject it;
+        it["type"]   = QStringLiteral("兑换");
+        it["source"] = r.value(1).toString();
+        it["time"]   = fmtTime(r.value(2).toString());
+        it["points"] = -pts;
+        items.append(it);
+    }
+
+    QJsonObject out;
+    out["points"]       = earned - spent;
+    out["total_earned"] = earned;
+    out["total_spent"]  = spent;
+    out["items"]        = items;
+    return Api::okData(out);
+}
+
+// 【积分兑换】校验积分充足后扣减（写入兑换记录）；"抵扣充电费用"类型额外转入余额
+Api::Reply UserService::redeemPoints(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    const QString itemId = data.value("item_id").toString();
+    if (userId <= 0 || itemId.isEmpty())
+        return Api::err(Api::InvalidParam, QStringLiteral("参数不完整"));
+
+    const RedeemItem* item = findRedeemItem(itemId);
+    if (!item) return Api::err(Api::InvalidParam, QStringLiteral("兑换项目不存在"));
+
+    QSqlDatabase db = DbManager::threadDb();
+
+    QSqlQuery u(db);
+    u.prepare(QStringLiteral("SELECT balance FROM users WHERE user_id = ?;"));
+    u.addBindValue(userId);
+    if (!u.exec() || !u.next()) return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+    const double balance = u.value(0).toDouble();
+
+    const double pointsFactor = configDouble(db, QStringLiteral("points_factor"), 1.0);
+    const int earned = qRound(userEnergy(db, userId) * pointsFactor);
+    const int current = earned - spentPoints(db, userId);
+    if (current < item->cost) {
+        return Api::err(Api::StateConflict,
+                        QStringLiteral("碳积分不足（当前 %1 分，需要 %2 分）")
+                            .arg(current).arg(item->cost));
+    }
+
+    const bool isDeduct = item->type == QStringLiteral("deduct");
+    db.transaction();
+
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO points_redemption (user_id, points, item_id, item_name, item_type, balance_credit) "
+        "VALUES (?,?,?,?,?,?);"));
+    ins.addBindValue(userId);
+    ins.addBindValue(item->cost);
+    ins.addBindValue(item->id);
+    ins.addBindValue(item->name);
+    ins.addBindValue(item->type);
+    ins.addBindValue(isDeduct ? item->value : 0.0);
+    if (!ins.exec()) {
+        db.rollback();
+        return Api::err(Api::ServerError, ins.lastError().text());
+    }
+    const int redeemId = ins.lastInsertId().toInt();
+
+    double newBalance = balance;
+    if (isDeduct) {
+        QSqlQuery b(db);
+        b.prepare(QStringLiteral("UPDATE users SET balance = balance + ? WHERE user_id = ?;"));
+        b.addBindValue(item->value);
+        b.addBindValue(userId);
+        b.exec();
+        newBalance = balance + item->value;
+    }
+
+    db.commit();
+
+    QJsonObject out;
+    out["points"]    = current - item->cost;
+    out["redeem_id"] = redeemId;
+    out["item_name"] = item->name;
+    out["balance"]   = newBalance;
     return Api::okData(out);
 }

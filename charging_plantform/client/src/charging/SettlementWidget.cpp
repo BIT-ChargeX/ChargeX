@@ -134,5 +134,6 @@ void SettlementWidget::onSettleClicked() {
                                       .arg(amount, 0, 'f', 2));
             m_noteLabel->setText(QStringLiteral("电桩已释放为【闲置】，余额已扣减。"));
             m_settleBtn->setEnabled(false);
+            emit settled();
         });
 }
