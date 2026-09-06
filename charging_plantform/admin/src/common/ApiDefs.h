@@ -23,6 +23,8 @@ inline constexpr const char* CmdPileRuntimeLogList= "PILE_RUNTIME_LOG_LIST";
 inline constexpr const char* CmdOpsLogList        = "OPS_LOG_LIST";
 inline constexpr const char* CmdStationMgmtList   = "STATION_MGMT_LIST";
 inline constexpr const char* CmdStationMgmtAdd    = "STATION_MGMT_ADD";
+// SALES_SUMMARY：入参 days(7/30) 或 start/end(yyyy-MM-dd,≤366天)；
+// 返回 today/month/total(+today_pct/month_pct 环比,-1 无基线)、daily[]、top_stations[]
 inline constexpr const char* CmdSalesSummary      = "SALES_SUMMARY";
 
 // ---- 错误码（与服务端一致）----
