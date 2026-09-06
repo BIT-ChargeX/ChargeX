@@ -42,10 +42,19 @@ QLabel* makeStatCard(const QString& caption, const QString& accentName,
     cap->setObjectName(QStringLiteral("statCaption"));
     v->addWidget(value);
     v->addWidget(cap);
+
+    v->addSpacing(2);
     if (footer) {
-        v->addSpacing(2);
         v->addWidget(footer);
+    } else {
+        // 占位与故障卡进度条等高，保证三卡视觉结构一致
+        auto* pad = new QWidget(box);
+        pad->setFixedHeight(6);
+        v->addWidget(pad);
     }
+    // 三卡统一拉伸策略与最小高度 → 行内等宽等高
+    box->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    box->setMinimumHeight(120);
     if (boxOut) *boxOut = box;
     return value;
 }
@@ -89,9 +98,11 @@ MonitorWidget::MonitorWidget(QWidget* parent) : QWidget(parent) {
     m_faultValue = makeStatCard(QStringLiteral("故障"), QStringLiteral("Red"), this, &boxFault, m_faultBar);
 
     auto* statRow = new QHBoxLayout;
-    statRow->addWidget(boxInUse);
-    statRow->addWidget(boxIdle);
-    statRow->addWidget(boxFault);
+    statRow->setSpacing(12);
+    // 等宽：三卡各占 1 份伸缩（等宽等高由 makeStatCard 统一策略保证）
+    statRow->addWidget(boxInUse, 1);
+    statRow->addWidget(boxIdle, 1);
+    statRow->addWidget(boxFault, 1);
     layout->addLayout(statRow);
 
     // 中部：状态分布明细 + 环形图

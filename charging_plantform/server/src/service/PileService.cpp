@@ -56,9 +56,14 @@ Api::Reply PileService::reboot(const QJsonObject& data) {
     if (!q.exec() || !q.next()) return Api::err(Api::NotFound, QStringLiteral("电桩不存在"));
 
     const QString status = q.value(0).toString();
-    if (status == QString(Api::PileStatus::kInUse)
-        || status == QString(Api::PileStatus::kReserved)) {
-        return Api::err(Api::StateConflict, QStringLiteral("电桩正在充电/被预约，禁止远程重启"));
+    // 规则：故障等待报修（禁止重启）；预约占用禁止；闲置/在用可重启
+    if (status == QString(Api::PileStatus::kFault)) {
+        return Api::err(Api::StateConflict,
+                        QStringLiteral("电桩故障等待报修，禁止远程重启，请先线下检修"));
+    }
+    if (status == QString(Api::PileStatus::kReserved)) {
+        return Api::err(Api::StateConflict,
+                        QStringLiteral("电桩被预约占用，禁止远程重启"));
     }
 
     db.transaction();
@@ -77,7 +82,7 @@ Api::Reply PileService::reboot(const QJsonObject& data) {
     log.addBindValue(pileId);
     log.addBindValue(operatorName.isEmpty() ? QStringLiteral("PC管理端")
                                             : operatorName);
-    log.addBindValue(QStringLiteral("远程重启(故障恢复)"));
+    log.addBindValue(QStringLiteral("远程重启"));
     log.exec();
     db.commit();
 
@@ -107,12 +112,44 @@ Api::Reply PileService::setStatus(const QJsonObject& data) {
     if (!q.exec() || !q.next()) return Api::err(Api::NotFound, QStringLiteral("电桩不存在"));
 
     const QString current = q.value(0).toString();
-    if (current == QString(Api::PileStatus::kInUse)
-        || current == QString(Api::PileStatus::kReserved)) {
-        return Api::err(Api::StateConflict, QStringLiteral("电桩正在充电/被预约，请先完成结算"));
+    const QString kIdle = QString(Api::PileStatus::kIdle);
+    const QString kInUse = QString(Api::PileStatus::kInUse);
+    const QString kFault = QString(Api::PileStatus::kFault);
+    const QString kReserved = QString(Api::PileStatus::kReserved);
+
+    // 状态机规则：
+    //  - 设故障：仅适用于 闲置 / 在用
+    //  - 恢复空闲：仅适用于 在用（故障=等待报修，禁止恢复）
+    //  - 预约占用：所有操作禁止
+    if (current == kReserved) {
+        return Api::err(Api::StateConflict,
+                        QStringLiteral("电桩被预约占用，禁止变更状态"));
+    }
+    if (status == kFault) {
+        if (current == kFault) {
+            return Api::err(Api::StateConflict,
+                            QStringLiteral("电桩已处于故障，等待报修"));
+        }
+        if (current != kIdle && current != kInUse) {
+            return Api::err(Api::StateConflict,
+                            QStringLiteral("仅闲置/在用充电桩可设为故障"));
+        }
+    } else {   // 恢复空闲（target = 闲置）
+        if (current == kFault) {
+            return Api::err(Api::StateConflict,
+                            QStringLiteral("电桩故障等待报修，禁止恢复空闲，请先线下检修"));
+        }
+        if (current == kIdle) {
+            return Api::err(Api::StateConflict,
+                            QStringLiteral("电桩已是闲置状态，无需恢复"));
+        }
+        if (current != kInUse) {
+            return Api::err(Api::StateConflict,
+                            QStringLiteral("仅在用充电桩可恢复为空闲"));
+        }
     }
 
-    const QString action = status == QString(Api::PileStatus::kFault)
+    const QString action = status == kFault
                                ? QStringLiteral("设置故障")
                                : QStringLiteral("恢复空闲");
 
