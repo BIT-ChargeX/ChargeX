@@ -143,13 +143,20 @@ void LoginWidget::onSendCodeClicked() {
     QJsonObject data;
     data["phone"] = phone;
     NetClient::instance().sendRequest(Api::CmdUserSendCode, data,
-        [this](const QJsonObject&, int code, const QString& msg) {
+        [this](const QJsonObject& resp, int code, const QString& msg) {
             if (code != 0) {
                 m_sendCodeBtn->setEnabled(true);
                 m_hintLabel->setText(QStringLiteral("获取验证码失败：%1").arg(msg));
                 return;
             }
-            m_hintLabel->setText(QStringLiteral("验证码已发送，请注意查收短信"));
+            // 演示模式：服务端未配置短信凭证时下发验证码，直接填入输入框
+            const QString devCode = resp.value("dev_code").toString();
+            if (!devCode.isEmpty()) {
+                m_codeEdit->setText(devCode);
+                m_hintLabel->setText(QStringLiteral("演示模式：验证码已自动填入"));
+            } else {
+                m_hintLabel->setText(QStringLiteral("验证码已发送，请注意查收短信"));
+            }
             startCountdown();
         });
 }

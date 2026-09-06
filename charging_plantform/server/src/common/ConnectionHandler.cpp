@@ -113,6 +113,7 @@ void ConnectionHandler::processFrames() {
             else if (cmd == Api::CmdStationNearby)     reply = StationService::nearby(data);
             else if (cmd == Api::CmdStationDetail)     reply = StationService::detail(data);
             else if (cmd == Api::CmdPileDetailList)    reply = StationService::pileDetailList(data);
+            else if (cmd == Api::CmdStationRecommend)  reply = StationService::recommend(data);
             else if (cmd == Api::CmdOrderCheckUnfinished) reply = OrderService::checkUnfinished(data);
             else if (cmd == Api::CmdOrderReserve)      reply = OrderService::reserve(data);
             else if (cmd == Api::CmdOrderCreate)       reply = OrderService::create(data);

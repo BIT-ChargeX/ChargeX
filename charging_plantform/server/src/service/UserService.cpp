@@ -78,6 +78,15 @@ Api::Reply UserService::sendCode(const QJsonObject& data) {
     const QString code = generateSmsCode(phone);
     QString err;
     if (!AliyunSms::send(phone, code, &err)) {
+        // 开发模式兜底：阿里云短信凭证未配置（AliyunSms.h 为空）时，
+        // 验证码随响应下发（客户端自动填充）并在服务端日志打印，
+        // 保证演示环境无真实短信通道也能走通登录；配置真实凭证后走正常短信分支。
+        if (QString::fromLatin1(AliyunSms::kAccessKeyId).trimmed().isEmpty()) {
+            QJsonObject out;
+            out["dev_code"] = code;
+            qInfo().noquote() << QStringLiteral("[演示模式] 未配置阿里云短信凭证，验证码：%1").arg(code);
+            return Api::okData(out);
+        }
         // 发送失败不落库：用户收不到验证码，也就无法用该验证码登录
         QMutexLocker lock(&g_smsCodesMutex);
         g_smsCodes.remove(phone);

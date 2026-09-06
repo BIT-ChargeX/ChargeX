@@ -11,10 +11,12 @@ inline constexpr int kPort = 9000;
 
 // 腾讯地图 WebService Key：演示前填入真实 key；
 // 留空时定位自动降级为"手动输入经纬度"，不影响其余功能。
-inline constexpr const char* kTencentMapKey = "";
+inline constexpr const char* kTencentMapKey = "U66BZ-DBO6U-H5AVC-GWFDF-BY7EO-LQFOX";
 inline constexpr const char* kTencentMapReferer = "ChargingClient";
 inline constexpr const char* kTencentGeocoderUrl = "https://apis.map.qq.com/ws/geocoder/v1/";
 inline constexpr const char* kTencentRouteUrl = "https://apis.map.qq.com/uri/v1/routeplan";
+// 地点联想（地址输入框关键字下拉提示）
+inline constexpr const char* kTencentSuggestionUrl = "https://apis.map.qq.com/ws/place/v1/suggestion/";
 
 // ---- 命令码 ----
 // 账户
@@ -27,6 +29,8 @@ inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
 inline constexpr const char* CmdStationNearby      = "STATION_NEARBY";
 inline constexpr const char* CmdStationDetail      = "STATION_DETAIL";
 inline constexpr const char* CmdPileDetailList     = "PILE_DETAIL_LIST";
+// 综合推荐（需求20）：服务端按 驾车距离/时长/价格/空闲率 加权评分排序
+inline constexpr const char* CmdStationRecommend   = "STATION_RECOMMEND";
 // 充电业务（孙晟云）
 inline constexpr const char* CmdOrderCheckUnfinished = "ORDER_CHECK_UNFINISHED";
 inline constexpr const char* CmdOrderReserve          = "ORDER_RESERVE";

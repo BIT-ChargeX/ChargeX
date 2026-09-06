@@ -1,5 +1,7 @@
 # 构建产物
 build/
+build-server/
+build-client/
 Debug/
 Release/
 

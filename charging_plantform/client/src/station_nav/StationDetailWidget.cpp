@@ -12,6 +12,8 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QFont>
+#include <QTimer>
+#include <QHideEvent>
 
 StationDetailWidget::StationDetailWidget(QWidget* parent) : QDialog(parent) {
     setWindowTitle(QStringLiteral("充电站详情"));
@@ -67,6 +69,21 @@ StationDetailWidget::StationDetailWidget(QWidget* parent) : QDialog(parent) {
 
     connect(m_pileTable, &QTableWidget::itemDoubleClicked, this,
             [this](QTableWidgetItem*) { onGoChargingClicked(); });
+
+    // 页面打开期间每 10s 轮询电桩状态（piledev 实时上报，数据库即最新值）
+    m_refreshTimer = new QTimer(this);
+    m_refreshTimer->setInterval(10000);
+    connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
+        if (m_station.value("station_id").toInt() > 0) {
+            loadDetail();
+            loadPiles();
+        }
+    });
+}
+
+void StationDetailWidget::hideEvent(QHideEvent* event) {
+    m_refreshTimer->stop();
+    QDialog::hideEvent(event);
 }
 
 void StationDetailWidget::showStation(const QJsonObject& station) {
@@ -86,6 +103,7 @@ void StationDetailWidget::showStation(const QJsonObject& station) {
     fillStationHeader(station);
     loadDetail();
     loadPiles();
+    m_refreshTimer->start();
 
     show();
 }
