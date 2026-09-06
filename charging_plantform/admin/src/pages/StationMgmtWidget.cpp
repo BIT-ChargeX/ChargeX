@@ -45,6 +45,10 @@ StationMgmtWidget::StationMgmtWidget(QWidget* parent) : QWidget(parent) {
     bar->addWidget(m_statusLabel);
     layout->addLayout(bar);
 
+    // 初始禁用，随选中行的状态机开启
+    m_faultBtn->setEnabled(false);
+    m_idleBtn->setEnabled(false);
+
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     splitter->setChildrenCollapsible(false);
 
@@ -84,6 +88,7 @@ StationMgmtWidget::StationMgmtWidget(QWidget* parent) : QWidget(parent) {
     m_pileTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_pileTable->setAlternatingRowColors(true);
     m_pileTable->verticalHeader()->setVisible(false);
+    m_pileTable->setToolTip(QStringLiteral("双击 闲置/在用 电桩可设为故障；故障桩等待报修"));
     pv->addWidget(m_pileTable, 1);
 
     splitter->addWidget(stPanel);
@@ -98,6 +103,10 @@ StationMgmtWidget::StationMgmtWidget(QWidget* parent) : QWidget(parent) {
     connect(m_idleBtn, &QPushButton::clicked, this, &StationMgmtWidget::onSetIdle);
     connect(m_stationTable, &QTableWidget::currentCellChanged,
             this, [this](int row, int, int, int) { onStationRowChanged(row); });
+    connect(m_pileTable, &QTableWidget::currentCellChanged,
+            this, [this](int, int, int, int) { updatePileButtons(); });
+    connect(m_pileTable, &QTableWidget::cellDoubleClicked,
+            this, &StationMgmtWidget::onPileTableDoubleClicked);
 
     refresh();
 }
@@ -231,6 +240,43 @@ void StationMgmtWidget::onSetIdle() {
     if (row < 0 || !m_pileTable->item(row, 0)) return;
     setPileStatus(m_pileTable->item(row, 0)->data(Qt::UserRole).toInt(),
                   QStringLiteral("闲置"));
+}
+
+void StationMgmtWidget::onPileTableDoubleClicked(int row, int column) {
+    Q_UNUSED(column)
+    if (row < 0 || !m_pileTable->item(row, 0) || !m_pileTable->item(row, 3)) return;
+
+    const int pileId = m_pileTable->item(row, 0)->data(Qt::UserRole).toInt();
+    const QString status = m_pileTable->item(row, 3)->text();
+
+    // 双击仅用于“闲置/在用 → 故障”；故障等待报修、预约占用禁止一切变更
+    if (status != QStringLiteral("闲置") && status != QStringLiteral("在用")) {
+        const QString hint = status == QStringLiteral("故障")
+            ? QStringLiteral("电桩故障等待报修，禁止设故障/恢复空闲，请先线下检修")
+            : QStringLiteral("电桩被预约占用，禁止变更状态");
+        QMessageBox::information(this, QStringLiteral("设为故障"), hint);
+        return;
+    }
+
+    const QString code = m_pileTable->item(row, 1)->text();
+    if (QMessageBox::question(this, QStringLiteral("设为故障"),
+                              QStringLiteral("确定将电桩 %1（%2）设为故障吗？")
+                                  .arg(pileId).arg(code),
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+    setPileStatus(pileId, QStringLiteral("故障"));
+}
+
+void StationMgmtWidget::updatePileButtons() {
+    const int row = m_pileTable->currentRow();
+    const bool has = row >= 0 && m_pileTable->item(row, 3);
+    const QString status = has ? m_pileTable->item(row, 3)->text() : QString();
+    // 设故障：闲置/在用；恢复空闲：仅在用；故障=等待报修（不提供操作）
+    m_faultBtn->setEnabled(status == QStringLiteral("闲置")
+                           || status == QStringLiteral("在用"));
+    m_idleBtn->setEnabled(status == QStringLiteral("在用"));
 }
 
 void StationMgmtWidget::onAddStation() {
