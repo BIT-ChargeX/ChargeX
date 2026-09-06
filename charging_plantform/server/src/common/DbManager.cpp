@@ -201,11 +201,22 @@ void DbManager::createSchema(QSqlDatabase db) {
                 created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );)SQL"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_redemption_user ON points_redemption(user_id);"),
+        // 充值记录表（供用户后续查询，支付方式为模拟支付）
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS recharge_record (
+                recharge_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(user_id),
+                amount      DECIMAL(10,2) NOT NULL,
+                pay_method  VARCHAR(32) NOT NULL DEFAULT '模拟支付',
+                created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );)SQL"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_recharge_user ON recharge_record(user_id);"),
         // 播种默认系统配置（幂等）
         QStringLiteral("INSERT OR IGNORE INTO sys_config (cfg_key, cfg_value, remark) VALUES "
                        "('carbon_factor','0.785','每充1度电相对燃油车减少的碳排放 kg'),"
                        "('tree_factor','18.0','一棵成年树年吸收CO2 kg'),"
-                       "('points_factor','1.0','每充1度电积分数');"),
+                       "('points_factor','1.0','每充1度电积分数'),"
+                       "('recharge_limit','5000.0','单笔充值限额(元)');"),
         // 默认管理员
         QStringLiteral("INSERT OR IGNORE INTO admins (account, password, name) "
                        "VALUES ('admin', '123456', '系统管理员');"),

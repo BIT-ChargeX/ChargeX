@@ -8,6 +8,7 @@ namespace UserService {
 Api::Reply login(const QJsonObject& data);
 Api::Reply updateProfile(const QJsonObject& data);
 Api::Reply recharge(const QJsonObject& data);
+Api::Reply rechargeRecords(const QJsonObject& data); // 充值记录查询
 Api::Reply getBalance(const QJsonObject& data);
 Api::Reply carbonStats(const QJsonObject& data);   // 碳积分与环保足迹
 Api::Reply pointsDetail(const QJsonObject& data);  // 积分明细列表

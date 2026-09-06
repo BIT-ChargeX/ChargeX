@@ -15,6 +15,7 @@ inline constexpr const char* CmdUserLogin          = "USER_LOGIN";   // 手机�
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
+inline constexpr const char* CmdUserRechargeRecords= "USER_RECHARGE_RECORDS"; // 充值记录查询
 inline constexpr const char* CmdUserCarbonStats    = "USER_CARBON_STATS";    // 碳积分与环保足迹
 inline constexpr const char* CmdUserPointsDetail   = "USER_POINTS_DETAIL";   // 积分明细列表
 inline constexpr const char* CmdUserPointsRedeem   = "USER_POINTS_REDEEM";   // 积分兑换
