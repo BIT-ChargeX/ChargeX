@@ -18,11 +18,13 @@ private slots:
     void onStationRowChanged(int row);
     void onSetFault();
     void onSetIdle();
+    void onPileTableDoubleClicked(int row, int column);
 
 private:
     void loadStations();
     void loadPilesOfStation(int stationId);
     void setPileStatus(int pileId, const QString& status);
+    void updatePileButtons();
 
     QTableWidget* m_stationTable;
     QTableWidget* m_pileTable;
