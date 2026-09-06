@@ -110,10 +110,10 @@ void UserMgmtWidget::loadUsers(const QString& keyword) {
                 QTableWidgetItem* stItem = m_table->item(i, 5);
                 if (status == 1) {
                     stItem->setForeground(QBrush(Theme::success()));
-                    stItem->setBackground(QBrush(QColor("#F0FDF4")));
+                    stItem->setBackground(QBrush(Theme::successContainer()));
                 } else {
                     stItem->setForeground(QBrush(Theme::danger()));
-                    stItem->setBackground(QBrush(QColor("#FEF2F2")));
+                    stItem->setBackground(QBrush(Theme::dangerContainer()));
                 }
             }
             m_countLabel->setText(QStringLiteral("共 %1 个用户").arg(users.size()));

@@ -18,8 +18,8 @@ QLabel* makeStatCard(const QString& caption, QWidget* parent, QWidget** boxOut) 
     auto* box = new QFrame(parent);
     box->setObjectName(QStringLiteral("statCardSky"));
     auto* v = new QVBoxLayout(box);
-    v->setContentsMargins(16, 12, 16, 12);
-    v->setSpacing(2);
+    v->setContentsMargins(18, 16, 18, 16);
+    v->setSpacing(4);
     auto* value = new QLabel(QStringLiteral("-"), box);
     value->setObjectName(QStringLiteral("statValue"));
     auto* cap = new QLabel(caption, box);
@@ -64,7 +64,7 @@ SalesWidget::SalesWidget(QWidget* parent) : QWidget(parent) {
     m_chartArea = new QFrame(this);
     m_chartArea->setObjectName(QStringLiteral("card"));
     auto* cv = new QVBoxLayout(m_chartArea);
-    cv->setContentsMargins(10, 8, 10, 8);
+    cv->setContentsMargins(16, 12, 16, 12);
     m_bar = new BarChartWidget(m_chartArea);
     m_bar->setBarColor(Theme::accent());
     cv->addWidget(m_bar, 1);

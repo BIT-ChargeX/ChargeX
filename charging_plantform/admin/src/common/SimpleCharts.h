@@ -39,5 +39,5 @@ protected:
 private:
     QVector<double> m_values;
     QStringList m_labels;
-    QColor m_barColor = QColor("#0369A1");
+    QColor m_barColor;
 };

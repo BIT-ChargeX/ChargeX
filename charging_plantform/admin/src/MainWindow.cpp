@@ -3,6 +3,7 @@
 #include "common/AdminSession.h"
 #include "common/Theme.h"
 #include "common/ApiDefs.h"
+#include "common/NavRail.h"
 #include "pages/MonitorWidget.h"
 #include "pages/SalesWidget.h"
 #include "pages/UserMgmtWidget.h"
@@ -10,11 +11,15 @@
 #include "pages/PileWidget.h"
 #include "pages/DeviceRuntimeWidget.h"
 
-#include <QTabWidget>
+#include <QStackedWidget>
+#include <QToolBar>
 #include <QLabel>
 #include <QPushButton>
-#include <QToolBar>
 #include <QStatusBar>
+#include <QWidget>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QFrame>
 #include <QSizePolicy>
 #include <QJsonObject>
 
@@ -50,8 +55,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     bar->addWidget(logoutBtn);
     addToolBar(bar);
 
-    buildTabs();
-    setCentralWidget(m_tabs);
+    buildPages();
 
     statusBar()->showMessage(QStringLiteral("业务均通过服务器处理：ChargingServer 端口 %1").arg(Api::kPort));
 
@@ -81,27 +85,60 @@ void MainWindow::updateSessionUi() {
                             ? QStringLiteral("管理员：%1").arg(AdminSession::instance().adminName())
                             : QStringLiteral("未登录"));
     m_statusLabel->setText(connected ? QStringLiteral("已连接服务器") : QStringLiteral("服务器未连接"));
-    m_statusLabel->setStyleSheet(connected
-        ? QStringLiteral("color:#15803D; background:#F0FDF4; padding:3px 10px;"
-                         "border-radius:10px; font-weight:600; font-size:12px;")
-        : QStringLiteral("color:#B91C1C; background:#FEF2F2; padding:3px 10px;"
-                         "border-radius:10px; font-weight:600; font-size:12px;"));
+    m_statusLabel->setStyleSheet(Theme::connPillQss(connected));
 }
 
-void MainWindow::buildTabs() {
-    m_tabs = new QTabWidget(this);
-    m_tabs->setDocumentMode(true);
-    m_tabs->addTab(new MonitorWidget(m_tabs), QStringLiteral("电桩状态监控"));
-    m_tabs->addTab(new SalesWidget(m_tabs), QStringLiteral("销售业绩"));
-    m_tabs->addTab(new UserMgmtWidget(m_tabs), QStringLiteral("用户管理"));
-    m_tabs->addTab(new StationMgmtWidget(m_tabs), QStringLiteral("充电站管理"));
-    m_tabs->addTab(new PileWidget(m_tabs), QStringLiteral("充电桩管理"));
-    m_tabs->addTab(new DeviceRuntimeWidget(m_tabs), QStringLiteral("充电桩实时日志"));
+void MainWindow::buildPages() {
+    auto* central = new QWidget(this);
+
+    // 左侧导航 + 右侧内容（页面放进栈中，构造时即创建，保持轮询/定时器运行）
+    m_rail = new NavRail(central);
+    m_stack = new QStackedWidget(central);
+
+    auto* row = new QHBoxLayout(central);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(0);
+    row->addWidget(m_rail);
+
+    auto* sep = new QFrame(central);
+    sep->setObjectName(QStringLiteral("brandSep"));
+    sep->setFixedWidth(1);
+    row->addWidget(sep);
+
+    auto* right = new QWidget(central);
+    auto* rv = new QVBoxLayout(right);
+    rv->setContentsMargins(22, 18, 22, 18);
+    rv->setSpacing(0);
+    rv->addWidget(m_stack);
+    row->addWidget(right, 1);
+
+    // 注册页面与导航项（顺序与旧页签一致）
+    const auto addPage = [&](QWidget* page, const QString& label, int icon) {
+        m_stack->addWidget(page);
+        m_pages.append(page);
+        m_rail->addItem(label, icon);
+    };
+
+    addPage(new MonitorWidget(m_stack), QStringLiteral("电桩状态监控"), 0);
+    addPage(new SalesWidget(m_stack), QStringLiteral("销售业绩"), 1);
+    addPage(new UserMgmtWidget(m_stack), QStringLiteral("用户管理"), 2);
+    addPage(new StationMgmtWidget(m_stack), QStringLiteral("充电站管理"), 3);
+    addPage(new PileWidget(m_stack), QStringLiteral("充电桩管理"), 4);
+    addPage(new DeviceRuntimeWidget(m_stack), QStringLiteral("充电桩实时日志"), 5);
+
+    connect(m_rail, &NavRail::selectionChanged, this,
+            [this](int index) {
+                if (index >= 0 && index < m_stack->count())
+                    m_stack->setCurrentIndex(index);
+            });
+    m_rail->setCurrentIndex(0);
+    m_stack->setCurrentIndex(0);
+
+    setCentralWidget(central);
 }
 
 void MainWindow::onRefreshAll() {
-    for (int i = 0; i < m_tabs->count(); ++i) {
-        QWidget* w = m_tabs->widget(i);
+    for (QWidget* w : m_pages) {
         if (auto* mon = qobject_cast<MonitorWidget*>(w)) mon->refresh();
         else if (auto* sale = qobject_cast<SalesWidget*>(w)) sale->refresh();
         else if (auto* usr = qobject_cast<UserMgmtWidget*>(w)) usr->refresh();
