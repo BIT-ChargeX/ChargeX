@@ -1,6 +1,5 @@
 #include "UserService.h"
 #include "DbManager.h"
-#include "AliyunSms.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -8,11 +7,6 @@
 #include <QRegularExpression>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QHash>
-#include <QMutex>
-#include <QMutexLocker>
-#include <QDateTime>
-#include <QRandomGenerator>
 #include <QDebug>
 
 namespace {
@@ -22,110 +16,61 @@ bool validPhone(const QString& p) {
     return re.match(p).hasMatch();
 }
 
-// 按手机号查询用户；不存在返回 -1
-int findUserIdByPhone(QSqlDatabase& db, const QString& phone, bool* frozen = nullptr) {
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT user_id, status FROM users WHERE phone = ?;"));
-    q.addBindValue(phone);
-    if (q.exec() && q.next()) {
-        if (frozen) *frozen = (q.value(1).toInt() == 0);
-        return q.value(0).toInt();
-    }
-    return -1;
-}
-
 } // namespace
 
-namespace {
-
-// 验证码存储：内存保存，5 分钟有效 + 一次性使用（服务重启即失效）。
-struct SmsCode {
-    QString code;
-    QDateTime expiresAt;
-};
-QHash<QString, SmsCode> g_smsCodes;   // phone -> 验证码
-QMutex g_smsCodesMutex;
-
-QString generateSmsCode(const QString& phone) {
-    QString code;
-    auto* rnd = QRandomGenerator::global();
-    for (int i = 0; i < 6; ++i) code += QString::number(rnd->bounded(10));
-    QMutexLocker lock(&g_smsCodesMutex);
-    g_smsCodes[phone] = SmsCode{code, QDateTime::currentDateTime().addSecs(5 * 60)};
-    return code;
-}
-
-// 校验并消耗验证码（一次性）：成功移除；不存在/过期/不匹配返回 false。
-bool consumeSmsCode(const QString& phone, const QString& code) {
-    QMutexLocker lock(&g_smsCodesMutex);
-    auto it = g_smsCodes.constFind(phone);
-    if (it == g_smsCodes.constEnd()) return false;
-    if (QDateTime::currentDateTime() > it.value().expiresAt) {
-        g_smsCodes.remove(phone);
-        return false;
-    }
-    if (it.value().code != code) return false;
-    g_smsCodes.remove(phone);
-    return true;
-}
-
-} // namespace
-
-Api::Reply UserService::sendCode(const QJsonObject& data) {
-    const QString phone = data.value("phone").toString();
-    if (!validPhone(phone)) return Api::err(Api::InvalidParam, QStringLiteral("手机号格式不正确"));
-
-    const QString code = generateSmsCode(phone);
-    QString err;
-    if (!AliyunSms::send(phone, code, &err)) {
-        // 发送失败不落库：用户收不到验证码，也就无法用该验证码登录
-        QMutexLocker lock(&g_smsCodesMutex);
-        g_smsCodes.remove(phone);
-        return Api::err(Api::ServerError, QStringLiteral("短信发送失败：%1").arg(err));
-    }
-
-    qInfo().noquote() << QStringLiteral("[短信] 已向 %1 发送登录验证码").arg(phone);
-    return Api::ok();
-}
-
+// 【需求1 - 手机号+密码登录】处理 USER_LOGIN：
+// 1) 校验手机号格式与密码非空；
+// 2) 按手机号查用户：已存在且被冻结 -> 拒绝；密码不匹配 -> 拒绝；
+// 3) 未注册 -> 自动创建账号（首次登录自动注册，密码存哈希）；
+// 4) 返回用户信息，客户端据此进入主页。
 Api::Reply UserService::login(const QJsonObject& data) {
     const QString phone = data.value("phone").toString();
-    const QString code = data.value("code").toString();
+    const QString password = data.value("password").toString();
     if (!validPhone(phone)) return Api::err(Api::InvalidParam, QStringLiteral("手机号格式不正确"));
-    if (!consumeSmsCode(phone, code))
-        return Api::err(Api::InvalidParam, QStringLiteral("验证码错误或已过期"));
+    if (password.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("请输入密码"));
 
     QSqlDatabase db = DbManager::threadDb();
-    bool frozen = false;
-    int userId = findUserIdByPhone(db, phone, &frozen);
-    if (userId >= 0 && frozen) {
-        return Api::err(Api::StateConflict, QStringLiteral("账号已被冻结，请联系客服"));
+    const QString hash = DbManager::hashPassword(password);
+
+    // 查是否已注册，顺带取回冻结状态与密码哈希
+    int userId = -1;
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT user_id, status, password FROM users WHERE phone = ?;"));
+    q.addBindValue(phone);
+    if (q.exec() && q.next()) {
+        userId = q.value(0).toInt();
+        if (q.value(1).toInt() == 0)   // status=0 表示冻结
+            return Api::err(Api::StateConflict, QStringLiteral("账号已被冻结，请联系客服"));
+        if (q.value(2).toString() != hash)
+            return Api::err(Api::InvalidParam, QStringLiteral("密码错误"));
     }
 
+    // 未注册 -> 自动创建账号（首次登录自动注册）
     if (userId < 0) {
-        // 首次登录自动注册：默认昵称"用户+手机号后4位"
         QSqlQuery ins(db);
         ins.prepare(QStringLiteral(
-            "INSERT INTO users (phone, nickname, avatar_url, balance, status) VALUES (?,?,?,0,1);"));
+            "INSERT INTO users (phone, nickname, avatar_url, balance, password, status) "
+            "VALUES (?,?,?,0,?,1);"));
         ins.addBindValue(phone);
         ins.addBindValue(QStringLiteral("用户%1").arg(phone.right(4)));
         ins.addBindValue(QString());
+        ins.addBindValue(hash);
         if (!ins.exec()) return Api::err(Api::ServerError, ins.lastError().text());
         userId = ins.lastInsertId().toInt();
     }
 
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral(
-        "SELECT nickname, avatar_url, balance FROM users WHERE user_id = ?;"));
-    q.addBindValue(userId);
-    if (!q.exec() || !q.next()) return Api::err(Api::ServerError, QStringLiteral("查询用户失败"));
+    // 返回用户信息
+    QSqlQuery sel(db);
+    sel.prepare(QStringLiteral("SELECT nickname, avatar_url, balance FROM users WHERE user_id = ?;"));
+    sel.addBindValue(userId);
+    if (!sel.exec() || !sel.next()) return Api::err(Api::ServerError, QStringLiteral("查询用户失败"));
 
     QJsonObject out;
     out["user_id"] = userId;
     out["phone"] = phone;
-    out["nickname"] = q.value(0).toString();
-    out["avatar"] = q.value(1).toString();
-    out["balance"] = q.value(2).toDouble();
+    out["nickname"] = sel.value(0).toString();
+    out["avatar"] = sel.value(1).toString();
+    out["balance"] = sel.value(2).toDouble();
     return Api::okData(out);
 }
 

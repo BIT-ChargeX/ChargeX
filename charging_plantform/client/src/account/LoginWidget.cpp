@@ -7,12 +7,10 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QVBoxLayout>
-#include <QHBoxLayout>
 #include <QRegularExpression>
 #include <QJsonObject>
 #include <QFont>
 #include <QMessageBox>
-#include <QTimer>
 
 LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
@@ -26,7 +24,7 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     title->setFont(titleFont);
     layout->addWidget(title);
 
-    auto* subTitle = new QLabel(QStringLiteral("手机号验证码登录（未注册将自动创建账号）"), this);
+    auto* subTitle = new QLabel(QStringLiteral("手机号密码登录（未注册将自动创建账号）"), this);
     subTitle->setAlignment(Qt::AlignCenter);
     layout->addWidget(subTitle);
 
@@ -34,23 +32,20 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     m_connLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_connLabel);
 
+    // 手机号输入框：仅数字、最多 11 位
     m_phoneEdit = new QLineEdit(this);
     m_phoneEdit->setPlaceholderText(QStringLiteral("请输入11位手机号"));
     m_phoneEdit->setMaxLength(11);
     m_phoneEdit->setFixedHeight(38);
     layout->addWidget(m_phoneEdit);
 
-    auto* codeRow = new QHBoxLayout;
-    m_codeEdit = new QLineEdit(this);
-    m_codeEdit->setPlaceholderText(QStringLiteral("请输入验证码"));
-    m_codeEdit->setMaxLength(6);
-    m_codeEdit->setFixedHeight(38);
-    m_sendCodeBtn = new QPushButton(QStringLiteral("获取验证码"), this);
-    m_sendCodeBtn->setFixedHeight(38);
-    m_sendCodeBtn->setMinimumWidth(112);
-    codeRow->addWidget(m_codeEdit, 1);
-    codeRow->addWidget(m_sendCodeBtn);
-    layout->addLayout(codeRow);
+    // 密码输入框：以圆点遮蔽显示
+    m_passwordEdit = new QLineEdit(this);
+    m_passwordEdit->setPlaceholderText(QStringLiteral("请输入密码"));
+    m_passwordEdit->setEchoMode(QLineEdit::Password);
+    m_passwordEdit->setMaxLength(32);
+    m_passwordEdit->setFixedHeight(38);
+    layout->addWidget(m_passwordEdit);
 
     m_loginBtn = new QPushButton(QStringLiteral("登录 / 注册"), this);
     m_loginBtn->setFixedHeight(42);
@@ -64,11 +59,6 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
 
     layout->addStretch(1);
 
-    m_countdownTimer = new QTimer(this);
-    m_countdownTimer->setInterval(1000);
-    connect(m_countdownTimer, &QTimer::timeout, this, &LoginWidget::onCountdownTick);
-
-    connect(m_sendCodeBtn, &QPushButton::clicked, this, &LoginWidget::onSendCodeClicked);
     connect(m_loginBtn, &QPushButton::clicked, this, &LoginWidget::onLoginClicked);
     connect(&NetClient::instance(), &NetClient::stateChanged,
             this, &LoginWidget::onNetStateChanged);
@@ -80,8 +70,7 @@ void LoginWidget::setBusy(bool busy) {
     m_busy = busy;
     m_loginBtn->setEnabled(!busy);
     m_phoneEdit->setEnabled(!busy);
-    m_codeEdit->setEnabled(!busy);
-    if (m_countdown == 0) m_sendCodeBtn->setEnabled(!busy);
+    m_passwordEdit->setEnabled(!busy);
 }
 
 void LoginWidget::onNetStateChanged(int state) {
@@ -101,64 +90,16 @@ void LoginWidget::onNetStateChanged(int state) {
     }
 }
 
-void LoginWidget::startCountdown() {
-    m_countdown = 60;
-    m_sendCodeBtn->setEnabled(false);
-    onCountdownTick();
-    m_countdownTimer->start();
-}
-
-void LoginWidget::onCountdownTick() {
-    if (m_countdown > 0) {
-        m_sendCodeBtn->setText(QStringLiteral("%1秒后重发").arg(m_countdown));
-        --m_countdown;
-    } else {
-        m_countdownTimer->stop();
-        m_sendCodeBtn->setEnabled(!m_busy);
-        m_sendCodeBtn->setText(QStringLiteral("获取验证码"));
-    }
-}
-
-void LoginWidget::onSendCodeClicked() {
-    if (m_busy) return;
-
-    const QString phone = m_phoneEdit->text().trimmed();
-    static const QRegularExpression re(QStringLiteral("^1[0-9]{10}$"));
-    if (!re.match(phone).hasMatch()) {
-        m_phoneEdit->clear();
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("手机号格式不正确（需11位数字，1开头）"));
-        return;
-    }
-
-    if (!NetClient::instance().isConnected()) {
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("服务器未连接，无法获取验证码"));
-        return;
-    }
-
-    m_sendCodeBtn->setEnabled(false);   // 防止重复点击重复计费
-    m_hintLabel->clear();
-
-    QJsonObject data;
-    data["phone"] = phone;
-    NetClient::instance().sendRequest(Api::CmdUserSendCode, data,
-        [this](const QJsonObject&, int code, const QString& msg) {
-            if (code != 0) {
-                m_sendCodeBtn->setEnabled(true);
-                m_hintLabel->setText(QStringLiteral("获取验证码失败：%1").arg(msg));
-                return;
-            }
-            m_hintLabel->setText(QStringLiteral("验证码已发送，请注意查收短信"));
-            startCountdown();
-        });
-}
-
+// 【需求1 - 登录/注册】点击"登录/注册"按钮：
+// 1) 校验手机号格式（11 位、1 开头），不合法则弹提示并清空手机号，流程结束；
+// 2) 校验密码非空，为空则弹提示；
+// 3) 通过后携带手机号 + 密码请求服务端（由服务端判断登录还是自动注册）。
 void LoginWidget::onLoginClicked() {
     if (m_busy) return;
 
     const QString phone = m_phoneEdit->text().trimmed();
-    const QString code = m_codeEdit->text().trimmed();
+    const QString password = m_passwordEdit->text();
+
     static const QRegularExpression re(QStringLiteral("^1[0-9]{10}$"));
     if (!re.match(phone).hasMatch()) {
         m_phoneEdit->clear();
@@ -166,9 +107,8 @@ void LoginWidget::onLoginClicked() {
                              QStringLiteral("手机号格式不正确，请重新输入"));
         return;
     }
-    if (code.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("请输入验证码"));
+    if (password.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("请输入密码"));
         return;
     }
     if (!NetClient::instance().isConnected()) {
@@ -178,22 +118,25 @@ void LoginWidget::onLoginClicked() {
     }
 
     m_hintLabel->clear();
-    requestLogin(phone, code);
+    requestLogin(phone, password);
 }
 
-void LoginWidget::requestLogin(const QString& phone, const QString& code) {
+// 发起登录请求并处理结果：
+// 1) 密码错误 -> 服务端返回错误，客户端清空密码并弹提示；
+// 2) 校验通过 -> 服务端已自动注册（若首次登录），客户端保存会话信息并进入主页。
+void LoginWidget::requestLogin(const QString& phone, const QString& password) {
     setBusy(true);
     m_hintLabel->setText(QStringLiteral("登录中…"));
 
     QJsonObject data;
     data["phone"] = phone;
-    data["code"] = code;
+    data["password"] = password;
 
     NetClient::instance().sendRequest(Api::CmdUserLogin, data,
         [this, phone](const QJsonObject& resp, int code, const QString& msg) {
             setBusy(false);
             if (code != 0) {
-                m_codeEdit->clear();
+                m_passwordEdit->clear();
                 QMessageBox::warning(this, QStringLiteral("提示"),
                                      QStringLiteral("登录失败：%1").arg(msg));
                 return;

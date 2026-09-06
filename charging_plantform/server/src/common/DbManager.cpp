@@ -12,10 +12,19 @@
 #include <QDateTime>
 #include <QTime>
 #include <QSet>
+#include <QCryptographicHash>
 
 QString DbManager::s_path = QString(Api::kDbFile);
 
 QString DbManager::dbPath() { return s_path; }
+
+// 密码哈希：SHA-256(固定盐 + 明文)。课程演示用简化方案，
+// 生产环境应改用 PBKDF2/bcrypt 等慢哈希 + 每用户随机盐。
+QString DbManager::hashPassword(const QString& plain) {
+    static const QByteArray kSalt = "ChargeX_Salt_2026";
+    return QString::fromLatin1(
+        QCryptographicHash::hash(kSalt + plain.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
 
 QString uniqueConnName() {
     return QStringLiteral("conn_%1_%2")
@@ -46,6 +55,7 @@ void DbManager::init(const QString& dbPath) {
 
     createSchema(db);
     ensurePileRealtimeColumns(db);
+    ensurePasswordColumn(db);   // 兼容旧库：给 users 表补 password 列
     seedDemo(db);
 }
 
@@ -70,6 +80,23 @@ void DbManager::ensurePileRealtimeColumns(QSqlDatabase db) {
     }
 }
 
+// 兼容旧库迁移：users 表若缺少 password 列则补上（SQLite 的 ALTER TABLE 不支持 IF NOT EXISTS）
+void DbManager::ensurePasswordColumn(QSqlDatabase db) {
+    QSqlQuery q(db);
+    q.exec(QStringLiteral("PRAGMA table_info(users);"));
+    bool has = false;
+    while (q.next()) {
+        if (q.value(1).toString() == QStringLiteral("password")) { has = true; break; }
+    }
+    if (!has) {
+        QSqlQuery alt(db);
+        if (!alt.exec(QStringLiteral(
+                "ALTER TABLE users ADD COLUMN password VARCHAR(64) NOT NULL DEFAULT '';"))) {
+            qWarning() << "[DbManager] 添加 password 列失败:" << alt.lastError().text();
+        }
+    }
+}
+
 void DbManager::createSchema(QSqlDatabase db) {
     QSqlQuery q(db);
     const QStringList ddl = {
@@ -81,6 +108,7 @@ void DbManager::createSchema(QSqlDatabase db) {
                 nickname    VARCHAR(32) NOT NULL,
                 avatar_url  VARCHAR(255) DEFAULT '',
                 balance     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                password    VARCHAR(64) NOT NULL DEFAULT '',
                 status      INTEGER NOT NULL DEFAULT 1,
                 reg_time    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );)SQL"),
@@ -175,17 +203,20 @@ void DbManager::seedDemo(QSqlDatabase db) {
     q.exec(QStringLiteral("SELECT COUNT(*) FROM users;"));
     if (q.next() && q.value(0).toInt() == 0) {
         q.prepare(QStringLiteral(
-            "INSERT INTO users (phone, nickname, avatar_url, balance, status) "
-            "VALUES (?, ?, '', ?, 1);"));
+            "INSERT INTO users (phone, nickname, avatar_url, balance, password, status) "
+            "VALUES (?, ?, '', ?, ?, 1);"));
         const QList<QPair<QString, double>> demoUsers = {
             {QStringLiteral("13800001111"), 66.00},
             {QStringLiteral("13900002222"), 20.50},
             {QStringLiteral("13700003333"), 0.00},
         };
+        // 演示用户统一密码 123456，方便测试"已注册账号"登录
+        const QString demoPass = DbManager::hashPassword(QStringLiteral("123456"));
         for (const auto& u : demoUsers) {
             q.addBindValue(u.first);
             q.addBindValue(QStringLiteral("用户%1").arg(u.first.right(4)));
             q.addBindValue(u.second);
+            q.addBindValue(demoPass);
             q.exec();
         }
     }
