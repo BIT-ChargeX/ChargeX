@@ -181,6 +181,31 @@ void DbManager::createSchema(QSqlDatabase db) {
                 detail        VARCHAR(128) DEFAULT ''
             );)SQL"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_prl_id ON pile_runtime_log(log_id DESC);"),
+        // 系统配置表（减排系数等可调参数，需求：系数可在配置表中调整）
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS sys_config (
+                cfg_key   VARCHAR(64) PRIMARY KEY,
+                cfg_value VARCHAR(64) NOT NULL,
+                remark    VARCHAR(128) DEFAULT ''
+            );)SQL"),
+        // 碳积分兑换记录表
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS points_redemption (
+                redeem_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER NOT NULL REFERENCES users(user_id),
+                points         INTEGER NOT NULL,
+                item_id        VARCHAR(32) DEFAULT '',
+                item_name      VARCHAR(64) DEFAULT '',
+                item_type      VARCHAR(16) DEFAULT 'coupon',
+                balance_credit DECIMAL(10,2) NOT NULL DEFAULT 0,
+                created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );)SQL"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_redemption_user ON points_redemption(user_id);"),
+        // 播种默认系统配置（幂等）
+        QStringLiteral("INSERT OR IGNORE INTO sys_config (cfg_key, cfg_value, remark) VALUES "
+                       "('carbon_factor','0.785','每充1度电相对燃油车减少的碳排放 kg'),"
+                       "('tree_factor','18.0','一棵成年树年吸收CO2 kg'),"
+                       "('points_factor','1.0','每充1度电积分数');"),
         // 默认管理员
         QStringLiteral("INSERT OR IGNORE INTO admins (account, password, name) "
                        "VALUES ('admin', '123456', '系统管理员');"),

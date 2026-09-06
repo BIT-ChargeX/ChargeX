@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QDateTime>
 #include <QDebug>
 
 namespace {
@@ -14,6 +15,81 @@ namespace {
 bool validPhone(const QString& p) {
     static const QRegularExpression re(QStringLiteral("^1[0-9]{10}$"));
     return re.match(p).hasMatch();
+}
+
+// 从系统配置表读取数值型配置，缺失/非法时回退默认值
+double configDouble(QSqlDatabase& db, const QString& key, double fallback) {
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT cfg_value FROM sys_config WHERE cfg_key = ?;"));
+    q.addBindValue(key);
+    if (q.exec() && q.next()) {
+        bool ok = false;
+        const double v = q.value(0).toString().toDouble(&ok);
+        if (ok) return v;
+    }
+    return fallback;
+}
+
+// 环保等级/称号（按累计碳积分划分）
+QString ecoLevel(int points) {
+    if (points >= 3000) return QStringLiteral("碳中和卫士");
+    if (points >= 1000) return QStringLiteral("环保达人");
+    if (points >= 500)  return QStringLiteral("低碳先锋");
+    if (points >= 100)  return QStringLiteral("绿色出行者");
+    return QStringLiteral("环保新秀");
+}
+
+// 时间格式化：ISO -> yyyy-MM-dd HH:mm:ss
+QString fmtTime(const QString& iso) {
+    const QDateTime dt = QDateTime::fromString(iso, Qt::ISODate);
+    return dt.isValid() ? dt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : iso;
+}
+
+// 用户累计充电量(kWh)：已完成订单 = 桩功率(kW) × 充电时长(小时)
+double userEnergy(QSqlDatabase& db, int userId) {
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(R"SQL(
+        SELECT COALESCE(SUM(
+                 p.power_kw *
+                 (julianday(o.end_time) - julianday(o.start_time)) * 24.0), 0.0)
+        FROM orders o JOIN piles p ON p.pile_id = o.pile_id
+        WHERE o.user_id = ? AND o.status = ?;)SQL"));
+    q.addBindValue(userId);
+    q.addBindValue(QString(Api::OrderStatus::kDone));
+    if (!q.exec()) return 0.0;
+    return q.next() ? q.value(0).toDouble() : 0.0;
+}
+
+// 用户已兑换积分总数
+int spentPoints(QSqlDatabase& db, int userId) {
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT COALESCE(SUM(points),0) FROM points_redemption WHERE user_id = ?;"));
+    q.addBindValue(userId);
+    if (q.exec() && q.next()) return q.value(0).toInt();
+    return 0;
+}
+
+// 可兑换项目（兑换优惠券 / 抵扣充电费用）
+struct RedeemItem {
+    QString id;
+    QString name;
+    QString type;   // "coupon" 优惠券 / "deduct" 抵扣充电费用(转余额)
+    int cost;       // 所需积分
+    double value;   // 面值/抵扣金额（元）
+};
+
+const RedeemItem* findRedeemItem(const QString& id) {
+    static const RedeemItem items[] = {
+        {QStringLiteral("coupon_5"),  QStringLiteral("满10减5元优惠券"),  QStringLiteral("coupon"), 100, 5.0},
+        {QStringLiteral("coupon_10"), QStringLiteral("满20减10元优惠券"), QStringLiteral("coupon"), 200, 10.0},
+        {QStringLiteral("coupon_30"), QStringLiteral("满50减30元优惠券"), QStringLiteral("coupon"), 500, 30.0},
+        {QStringLiteral("deduct_5"),  QStringLiteral("充电费抵扣 ¥5"),   QStringLiteral("deduct"), 100, 5.0},
+        {QStringLiteral("deduct_20"), QStringLiteral("充电费抵扣 ¥20"),  QStringLiteral("deduct"), 400, 20.0},
+    };
+    for (const auto& it : items) {
+        if (it.id == id) return &it;
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -86,6 +162,9 @@ Api::Reply UserService::updateProfile(const QJsonObject& data) {
     if (!hasNickname && !hasAvatar) {
         return Api::err(Api::InvalidParam, QStringLiteral("没有需要修改的内容"));
     }
+    if (hasNickname && newNickname.trimmed().length() > 32) {
+        return Api::err(Api::InvalidParam, QStringLiteral("昵称长度不能超过 32 个字符"));
+    }
 
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
@@ -146,5 +225,160 @@ Api::Reply UserService::getBalance(const QJsonObject& data) {
 
     QJsonObject out;
     out["balance"] = q.value(0).toDouble();
+    return Api::okData(out);
+}
+
+// 【碳积分与环保足迹】根据历史已完成订单实时计算：
+//   减碳量 = 累计充电量 × carbon_factor
+//   等效植树 = 减碳量 ÷ tree_factor
+//   碳积分 = 累计充电量 × points_factor（再减去已兑换积分）
+Api::Reply UserService::carbonStats(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    const double energy = userEnergy(db, userId);
+
+    const double carbonFactor = configDouble(db, QStringLiteral("carbon_factor"), 0.785);
+    const double treeFactor   = configDouble(db, QStringLiteral("tree_factor"), 18.0);
+    const double pointsFactor = configDouble(db, QStringLiteral("points_factor"), 1.0);
+
+    const double carbon = energy * carbonFactor;
+    const double trees  = treeFactor > 0 ? carbon / treeFactor : 0.0;
+    const int earned    = qRound(energy * pointsFactor);
+    const int points    = earned - spentPoints(db, userId);
+
+    QJsonObject out;
+    out["energy_kwh"] = energy;
+    out["carbon_kg"]  = carbon;
+    out["trees"]      = trees;
+    out["points"]     = points;
+    out["level"]      = ecoLevel(points);
+    return Api::okData(out);
+}
+
+// 【积分明细】合并"充电所得(+)"与"兑换支出(-)"两类记录
+Api::Reply UserService::pointsDetail(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    const double pointsFactor = configDouble(db, QStringLiteral("points_factor"), 1.0);
+
+    QJsonArray items;
+    int earned = 0;
+
+    // 充电所得
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(R"SQL(
+        SELECT o.order_id, o.end_time,
+               p.power_kw * (julianday(o.end_time) - julianday(o.start_time)) * 24.0 AS energy
+        FROM orders o JOIN piles p ON p.pile_id = o.pile_id
+        WHERE o.user_id = ? AND o.status = ?
+        ORDER BY o.order_id DESC;)SQL"));
+    q.addBindValue(userId);
+    q.addBindValue(QString(Api::OrderStatus::kDone));
+    if (!q.exec()) return Api::err(Api::ServerError, q.lastError().text());
+    while (q.next()) {
+        const int pts = qRound(q.value(2).toDouble() * pointsFactor);
+        if (pts <= 0) continue;
+        earned += pts;
+        QJsonObject it;
+        it["type"]   = QStringLiteral("充电");
+        it["source"] = QStringLiteral("订单 #%1").arg(q.value(0).toInt());
+        it["time"]   = fmtTime(q.value(1).toString());
+        it["points"] = pts;
+        items.append(it);
+    }
+
+    // 兑换支出
+    int spent = 0;
+    QSqlQuery r(db);
+    r.prepare(QStringLiteral("SELECT points, item_name, created_at FROM points_redemption "
+                             "WHERE user_id = ? ORDER BY redeem_id DESC;"));
+    r.addBindValue(userId);
+    if (!r.exec()) return Api::err(Api::ServerError, r.lastError().text());
+    while (r.next()) {
+        const int pts = r.value(0).toInt();
+        spent += pts;
+        QJsonObject it;
+        it["type"]   = QStringLiteral("兑换");
+        it["source"] = r.value(1).toString();
+        it["time"]   = fmtTime(r.value(2).toString());
+        it["points"] = -pts;
+        items.append(it);
+    }
+
+    QJsonObject out;
+    out["points"]       = earned - spent;
+    out["total_earned"] = earned;
+    out["total_spent"]  = spent;
+    out["items"]        = items;
+    return Api::okData(out);
+}
+
+// 【积分兑换】校验积分充足后扣减（写入兑换记录）；"抵扣充电费用"类型额外转入余额
+Api::Reply UserService::redeemPoints(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    const QString itemId = data.value("item_id").toString();
+    if (userId <= 0 || itemId.isEmpty())
+        return Api::err(Api::InvalidParam, QStringLiteral("参数不完整"));
+
+    const RedeemItem* item = findRedeemItem(itemId);
+    if (!item) return Api::err(Api::InvalidParam, QStringLiteral("兑换项目不存在"));
+
+    QSqlDatabase db = DbManager::threadDb();
+
+    QSqlQuery u(db);
+    u.prepare(QStringLiteral("SELECT balance FROM users WHERE user_id = ?;"));
+    u.addBindValue(userId);
+    if (!u.exec() || !u.next()) return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+    const double balance = u.value(0).toDouble();
+
+    const double pointsFactor = configDouble(db, QStringLiteral("points_factor"), 1.0);
+    const int earned = qRound(userEnergy(db, userId) * pointsFactor);
+    const int current = earned - spentPoints(db, userId);
+    if (current < item->cost) {
+        return Api::err(Api::StateConflict,
+                        QStringLiteral("碳积分不足（当前 %1 分，需要 %2 分）")
+                            .arg(current).arg(item->cost));
+    }
+
+    const bool isDeduct = item->type == QStringLiteral("deduct");
+    db.transaction();
+
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO points_redemption (user_id, points, item_id, item_name, item_type, balance_credit) "
+        "VALUES (?,?,?,?,?,?);"));
+    ins.addBindValue(userId);
+    ins.addBindValue(item->cost);
+    ins.addBindValue(item->id);
+    ins.addBindValue(item->name);
+    ins.addBindValue(item->type);
+    ins.addBindValue(isDeduct ? item->value : 0.0);
+    if (!ins.exec()) {
+        db.rollback();
+        return Api::err(Api::ServerError, ins.lastError().text());
+    }
+    const int redeemId = ins.lastInsertId().toInt();
+
+    double newBalance = balance;
+    if (isDeduct) {
+        QSqlQuery b(db);
+        b.prepare(QStringLiteral("UPDATE users SET balance = balance + ? WHERE user_id = ?;"));
+        b.addBindValue(item->value);
+        b.addBindValue(userId);
+        b.exec();
+        newBalance = balance + item->value;
+    }
+
+    db.commit();
+
+    QJsonObject out;
+    out["points"]    = current - item->cost;
+    out["redeem_id"] = redeemId;
+    out["item_name"] = item->name;
+    out["balance"]   = newBalance;
     return Api::okData(out);
 }
