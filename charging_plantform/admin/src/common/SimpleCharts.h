@@ -4,9 +4,12 @@
 #include <QPair>
 #include <QColor>
 #include <QStringList>
+#include <QSet>
+
+class QMouseEvent;
 
 // 依赖 Qt Widgets 的轻量图表（QPainter 自绘，不依赖 QtCharts 可选模块）。
-// PieChartWidget：环形状态分布图 + 右侧图例
+// PieChartWidget：环形状态分布图 + 右侧图例；图例行可点击显隐对应分类。
 class PieChartWidget : public QWidget {
     Q_OBJECT
 public:
@@ -17,10 +20,15 @@ public:
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
 
 private:
+    void toggle(int index);
+    bool isHidden(int index) const;
+
     QVector<QPair<QString, int>> m_items;
     QVector<QColor> m_colors;
+    QSet<int> m_hidden;
     int m_total = 0;
 };
 
