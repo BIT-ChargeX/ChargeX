@@ -29,6 +29,8 @@ bool validPassword(const QString& p) {
         else if (c.isDigit()) hasDigit = true;
     }
     return hasUpper && hasLower && hasDigit;
+}
+
 // 从系统配置表读取数值型配置，缺失/非法时回退默认值
 double configDouble(QSqlDatabase& db, const QString& key, double fallback) {
     QSqlQuery q(db);
@@ -108,9 +110,8 @@ const RedeemItem* findRedeemItem(const QString& id) {
 
 // 【需求1 - 手机号+密码登录】处理 USER_LOGIN：
 // 1) 校验手机号格式与密码非空；
-// 2) 按手机号查用户：已存在且被冻结 -> 拒绝；密码不匹配 -> 拒绝；
-// 3) 未注册 -> 自动创建账号（首次登录自动注册，密码存哈希）；
-// 4) 返回用户信息，客户端据此进入主页。
+// 2) 按手机号查用户：不存在 -> 提示先注册；冻结 -> 拒绝；密码不匹配 -> 拒绝；
+// 3) 校验通过 -> 返回用户信息，客户端据此进入主页。
 Api::Reply UserService::login(const QJsonObject& data) {
     const QString phone = data.value("phone").toString();
     const QString password = data.value("password").toString();
