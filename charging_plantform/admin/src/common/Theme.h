@@ -59,6 +59,26 @@ inline QColor statusBackground(const QString& status) {
     return surfaceContainer();
 }
 
+// 订单状态 -> 语义色（文字/前景）
+inline QColor orderStatusText(const QString& status) {
+    if (status == QStringLiteral("预约占用")) return QColor("#92400E");
+    if (status == QStringLiteral("充电中"))   return QColor("#075985");
+    if (status == QStringLiteral("待结算"))   return QColor("#3730A3");
+    if (status == QStringLiteral("已完成"))   return success();
+    if (status == QStringLiteral("已取消"))   return textMuted();
+    return textSecondary();
+}
+
+// 订单状态 -> 语义浅底（chip 容器）
+inline QColor orderStatusBackground(const QString& status) {
+    if (status == QStringLiteral("预约占用")) return QColor("#FEF3C7");
+    if (status == QStringLiteral("充电中"))   return QColor("#E0F2FE");
+    if (status == QStringLiteral("待结算"))   return QColor("#E4E1FF");
+    if (status == QStringLiteral("已完成"))   return successContainer();
+    if (status == QStringLiteral("已取消"))   return surfaceHigh();
+    return surfaceContainer();
+}
+
 // ---- 态化 QSS 辅助（把内联色收编到令牌） ----
 // 告警条（MonitorWidget 底部）/ 连接 pill（MainWindow 顶部）样式字符串
 QString alarmQss(bool ok);

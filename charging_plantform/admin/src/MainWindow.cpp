@@ -9,6 +9,7 @@
 #include "pages/UserMgmtWidget.h"
 #include "pages/StationMgmtWidget.h"
 #include "pages/PileWidget.h"
+#include "pages/OrderWidget.h"
 #include "pages/DeviceRuntimeWidget.h"
 
 #include <QStackedWidget>
@@ -135,6 +136,7 @@ void MainWindow::buildPages() {
     addPage(new UserMgmtWidget(m_stack), QStringLiteral("用户管理"), 2);
     addPage(new StationMgmtWidget(m_stack), QStringLiteral("充电站管理"), 3);
     addPage(new PileWidget(m_stack), QStringLiteral("充电桩管理"), 4);
+    addPage(new OrderWidget(m_stack), QStringLiteral("订单管理"), 6);
     addPage(new DeviceRuntimeWidget(m_stack), QStringLiteral("充电桩实时日志"), 5);
 
     connect(m_rail, &NavRail::selectionChanged, this,
@@ -155,6 +157,7 @@ void MainWindow::onRefreshAll() {
         else if (auto* usr = qobject_cast<UserMgmtWidget*>(w)) usr->refresh();
         else if (auto* st = qobject_cast<StationMgmtWidget*>(w)) st->refresh();
         else if (auto* pile = qobject_cast<PileWidget*>(w)) pile->refresh();
+        else if (auto* ord = qobject_cast<OrderWidget*>(w)) ord->refresh();
         else if (auto* dev = qobject_cast<DeviceRuntimeWidget*>(w)) dev->refresh();
     }
     statusBar()->showMessage(QStringLiteral("已请求刷新全部页面"), 3000);
