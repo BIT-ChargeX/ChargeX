@@ -28,12 +28,15 @@ SOURCES += \
     src/account/LoginWidget.cpp \
     src/account/ProfileWidget.cpp \
     src/account/RechargeWidget.cpp \
+    src/account/RechargeRecordsWidget.cpp \
+    src/account/PointsWidget.cpp \
     src/station_nav/StationListWidget.cpp \
     src/station_nav/StationDetailWidget.cpp \
     src/station_nav/NavWidget.cpp \
     src/station_nav/MapPickerWidget.cpp \
     src/charging/ChargingFlowWidget.cpp \
-    src/charging/SettlementWidget.cpp
+    src/charging/SettlementWidget.cpp \
+    src/charging/OrderListWidget.cpp
 
 HEADERS += \
     src/HomeWindow.h \
@@ -44,9 +47,12 @@ HEADERS += \
     src/account/LoginWidget.h \
     src/account/ProfileWidget.h \
     src/account/RechargeWidget.h \
+    src/account/RechargeRecordsWidget.h \
+    src/account/PointsWidget.h \
     src/station_nav/StationListWidget.h \
     src/station_nav/StationDetailWidget.h \
     src/station_nav/NavWidget.h \
     src/station_nav/MapPickerWidget.h \
     src/charging/ChargingFlowWidget.h \
-    src/charging/SettlementWidget.h
+    src/charging/SettlementWidget.h \
+    src/charging/OrderListWidget.h

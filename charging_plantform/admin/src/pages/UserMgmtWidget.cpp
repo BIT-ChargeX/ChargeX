@@ -50,6 +50,7 @@ UserMgmtWidget::UserMgmtWidget(QWidget* parent) : QWidget(parent) {
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setAlternatingRowColors(true);
     m_table->verticalHeader()->setVisible(false);
+    m_table->setToolTip(QStringLiteral("双击用户行可冻结 / 解冻"));
     layout->addWidget(m_table, 1);
 
     m_countLabel = new QLabel(this);
@@ -61,6 +62,8 @@ UserMgmtWidget::UserMgmtWidget(QWidget* parent) : QWidget(parent) {
     connect(m_refreshBtn, &QPushButton::clicked, this, &UserMgmtWidget::refresh);
     connect(m_freezeBtn, &QPushButton::clicked, this, &UserMgmtWidget::onToggleFreeze);
     connect(m_unfreezeBtn, &QPushButton::clicked, this, &UserMgmtWidget::onToggleFreeze);
+    connect(m_table, &QTableWidget::cellDoubleClicked,
+            this, &UserMgmtWidget::onRowDoubleClicked);
 
     refresh();
 }
@@ -122,10 +125,34 @@ void UserMgmtWidget::loadUsers(const QString& keyword) {
 
 void UserMgmtWidget::onToggleFreeze() {
     const int row = m_table->currentRow();
-    if (row < 0) return;
+    if (row < 0 || !m_table->item(row, 0)) return;
     const int userId = m_table->item(row, 0)->data(Qt::UserRole).toInt();
-    const bool doFreeze = sender() == m_freezeBtn;
+    setUserStatus(userId, sender() == m_freezeBtn);
+}
 
+void UserMgmtWidget::onRowDoubleClicked(int row, int column) {
+    Q_UNUSED(column)
+    if (row < 0 || !m_table->item(row, 0) || !m_table->item(row, 5)) return;
+    const int userId = m_table->item(row, 0)->data(Qt::UserRole).toInt();
+    const int status = m_table->item(row, 5)->data(Qt::UserRole).toInt();
+    const bool doFreeze = status == 1;
+    const QString phone = m_table->item(row, 1)->text();
+
+    const QString text = doFreeze
+        ? QStringLiteral("确定冻结用户 %1（%2）吗？冻结后该用户无法登录充电。")
+              .arg(userId).arg(phone)
+        : QStringLiteral("确定解冻用户 %1（%2）吗？")
+              .arg(userId).arg(phone);
+    if (QMessageBox::question(this, doFreeze ? QStringLiteral("冻结确认")
+                                             : QStringLiteral("解冻确认"),
+                              text, QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+    setUserStatus(userId, doFreeze);
+}
+
+void UserMgmtWidget::setUserStatus(int userId, bool doFreeze) {
     QJsonObject data;
     AdminSession::instance().attach(data);
     data["user_id"] = userId;

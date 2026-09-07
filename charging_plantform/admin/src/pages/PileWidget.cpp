@@ -52,6 +52,7 @@ PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
     m_pileTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_pileTable->setAlternatingRowColors(true);
     m_pileTable->verticalHeader()->setVisible(false);
+    m_pileTable->setToolTip(QStringLiteral("双击 闲置/在用 电桩可远程重启；故障桩等待报修"));
     pv->addWidget(m_pileTable, 1);
 
     auto* logPanel = new QWidget(splitter);
@@ -77,6 +78,13 @@ PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
 
     connect(m_refreshBtn, &QPushButton::clicked, this, &PileWidget::refresh);
     connect(m_rebootBtn, &QPushButton::clicked, this, &PileWidget::onReboot);
+    connect(m_pileTable, &QTableWidget::currentCellChanged,
+            this, [this](int, int, int, int) { updateRebootButton(); });
+    connect(m_pileTable, &QTableWidget::cellDoubleClicked,
+            this, &PileWidget::onRowDoubleClicked);
+
+    // 初始禁用，随选中行状态机开启（闲置/在用才可重启）
+    m_rebootBtn->setEnabled(false);
 
     refresh();
 }
@@ -162,8 +170,52 @@ void PileWidget::onReboot() {
         QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("请先选中一个电桩"));
         return;
     }
+    if (!canRebootRow(row)) {
+        const QString status = m_pileTable->item(row, 5)->text();
+        QMessageBox::information(this, QStringLiteral("远程重启"),
+            status == QStringLiteral("故障")
+                ? QStringLiteral("电桩故障等待报修，禁止远程重启，请先线下检修")
+                : QStringLiteral("电桩被预约占用，禁止远程重启"));
+        return;
+    }
     const int pileId = m_pileTable->item(row, 0)->data(Qt::UserRole).toInt();
+    doReboot(pileId);
+}
 
+void PileWidget::onRowDoubleClicked(int row, int column) {
+    Q_UNUSED(column)
+    if (row < 0 || !m_pileTable->item(row, 0)) return;
+    if (!canRebootRow(row)) {
+        const QString status = m_pileTable->item(row, 5)->text();
+        QMessageBox::information(this, QStringLiteral("远程重启"),
+            status == QStringLiteral("故障")
+                ? QStringLiteral("电桩故障等待报修，禁止远程重启，请先线下检修")
+                : QStringLiteral("电桩被预约占用，禁止远程重启"));
+        return;
+    }
+    const int pileId = m_pileTable->item(row, 0)->data(Qt::UserRole).toInt();
+    if (QMessageBox::question(this, QStringLiteral("远程重启"),
+                              QStringLiteral("确定远程重启电桩 %1 吗？重启后恢复为【闲置】。")
+                                  .arg(pileId),
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+    doReboot(pileId);
+}
+
+void PileWidget::updateRebootButton() {
+    m_rebootBtn->setEnabled(canRebootRow(m_pileTable->currentRow()));
+}
+
+bool PileWidget::canRebootRow(int row) {
+    if (row < 0 || !m_pileTable->item(row, 5)) return false;
+    const QString s = m_pileTable->item(row, 5)->text();
+    // 远程重启仅适用于 闲置/在用；故障等待报修、预约占用不可
+    return s == QStringLiteral("闲置") || s == QStringLiteral("在用");
+}
+
+void PileWidget::doReboot(int pileId) {
     QJsonObject data;
     AdminSession::instance().attach(data);
     data["pile_id"] = pileId;

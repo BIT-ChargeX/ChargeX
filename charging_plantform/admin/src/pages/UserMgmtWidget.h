@@ -7,6 +7,7 @@ class QTableWidget;
 class QLabel;
 
 // 需求14：用户账号管理（经 USER_LIST / USER_FREEZE 协议请求服务器）
+// 支持搜索、冻结/解冻；双击用户行可直接冻结/解冻（带确认）。
 class UserMgmtWidget : public QWidget {
     Q_OBJECT
 public:
@@ -17,9 +18,11 @@ public:
 private slots:
     void onSearch();
     void onToggleFreeze();
+    void onRowDoubleClicked(int row, int column);
 
 private:
     void loadUsers(const QString& keyword = QString());
+    void setUserStatus(int userId, bool doFreeze);
 
     QLineEdit* m_searchEdit;
     QPushButton* m_searchBtn;
