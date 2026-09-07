@@ -1,15 +1,13 @@
 #include "StationListWidget.h"
+#include "MapPickerWidget.h"
 #include "common/NetClient.h"
 #include "common/AppSession.h"
 #include "common/MapApi.h"
 #include "common/ApiDefs.h"
 
 #include <QLineEdit>
-#include <QDoubleSpinBox>
 #include <QPushButton>
 #include <QComboBox>
-#include <QCompleter>
-#include <QStringListModel>
 #include <QTimer>
 #include <QListWidget>
 #include <QListWidgetItem>
@@ -23,7 +21,7 @@
 
 StationListWidget::StationListWidget(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
-    layout->setSpacing(8);
+    layout->setSpacing(6);
 
     // 需求2：下拉选择区域确定当前位置（预置北京各区中心经纬度，无需地图 key 即可用）
     auto* regionRow = new QHBoxLayout;
@@ -47,28 +45,28 @@ StationListWidget::StationListWidget(QWidget* parent) : QWidget(parent) {
     regionRow->addWidget(m_regionCombo, 1);
     layout->addLayout(regionRow);
 
+    // 地址输入 + 联想下拉：输入 >=2 字后 300ms 防抖自动调腾讯地点联想，
+    // 也可以点"候选"按钮立即弹出；结果以"标题（区名）"展示
     auto* addrRow = new QHBoxLayout;
     m_addressEdit = new QLineEdit(this);
-    m_addressEdit->setPlaceholderText(QStringLiteral("输入地址定位，如：北京市海淀区中关村"));
-    m_locateAddrBtn = new QPushButton(QStringLiteral("地址定位"), this);
+    m_addressEdit->setPlaceholderText(QStringLiteral("输入地址，如：北京理工大学"));
+    m_suggestBtn = new QPushButton(QStringLiteral("候选 ▾"), this);
+    m_locateAddrBtn = new QPushButton(QStringLiteral("定位"), this);
     addrRow->addWidget(m_addressEdit, 1);
+    addrRow->addWidget(m_suggestBtn);
     addrRow->addWidget(m_locateAddrBtn);
     layout->addLayout(addrRow);
 
-    auto* coordRow = new QHBoxLayout;
-    m_latSpin = new QDoubleSpinBox(this);
-    m_latSpin->setRange(-90.0, 90.0);
-    m_latSpin->setDecimals(6);
-    m_latSpin->setPrefix(QStringLiteral("纬度 "));
-    m_lngSpin = new QDoubleSpinBox(this);
-    m_lngSpin->setRange(-180.0, 180.0);
-    m_lngSpin->setDecimals(6);
-    m_lngSpin->setPrefix(QStringLiteral("经度 "));
-    m_locateCoordBtn = new QPushButton(QStringLiteral("按坐标查询"), this);
-    coordRow->addWidget(m_latSpin);
-    coordRow->addWidget(m_lngSpin);
-    coordRow->addWidget(m_locateCoordBtn);
-    layout->addLayout(coordRow);
+    // 当前定位经纬度展示
+    m_posLabel = new QLabel(this);
+    m_posLabel->setStyleSheet(QStringLiteral("color: #1565c0; font-size: 12px;"));
+    m_posLabel->setWordWrap(true);
+    layout->addWidget(m_posLabel);
+
+    // 内嵌地图：选中联想地址后以其为中心；点击地图任意点 = 二次选点（最终经纬度）
+    m_mapPicker = new MapPickerWidget(this);
+    m_mapPicker->setFixedHeight(260);   // 固定高度，避免与列表抢空间导致跳动
+    layout->addWidget(m_mapPicker);
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setWordWrap(true);
@@ -76,31 +74,57 @@ StationListWidget::StationListWidget(QWidget* parent) : QWidget(parent) {
 
     m_listWidget = new QListWidget(this);
     m_listWidget->setSpacing(4);
+    m_listWidget->setMinimumHeight(140);
     layout->addWidget(m_listWidget, 1);
 
-    m_latSpin->setValue(AppSession::instance().latitude());
-    m_lngSpin->setValue(AppSession::instance().longitude());
+    updatePosLabel(AppSession::instance().latitude(), AppSession::instance().longitude(),
+                   QStringLiteral("北京市区默认"));
+
+    // 联想下拉弹窗：独立 Tool 窗口（Qt::Popup 会被 WebEngine 原生窗口遮挡，
+    // Tool 窗口始终浮在最上层，渲染可靠）
+    m_suggestPopup = new QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint);
+    m_suggestPopup->setAttribute(Qt::WA_ShowWithoutActivating);
+    m_suggestPopup->setStyleSheet(QStringLiteral(
+        "QWidget#suggestPopup { background: #ffffff; border: 1px solid #90a4ae; }"));
+    m_suggestPopup->setObjectName(QStringLiteral("suggestPopup"));
+    auto* popupLayout = new QVBoxLayout(m_suggestPopup);
+    popupLayout->setContentsMargins(2, 2, 2, 2);
+    m_suggestList = new QListWidget(m_suggestPopup);
+    m_suggestList->setFocusPolicy(Qt::NoFocus);
+    m_suggestList->setStyleSheet(QStringLiteral(
+        "QListWidget { border: none; background: #ffffff; }"
+        "QListWidget::item { padding: 6px 4px; color: #222; }"
+        "QListWidget::item:hover { background: #e3f2fd; }"
+        "QListWidget::item:selected { background: #e3f2fd; color: #1565c0; }"));
+    popupLayout->addWidget(m_suggestList);
 
     connect(m_locateAddrBtn, &QPushButton::clicked, this, &StationListWidget::onLocateByAddress);
-    connect(m_locateCoordBtn, &QPushButton::clicked, this, &StationListWidget::onLocateByCoords);
+    connect(m_suggestBtn, &QPushButton::clicked, this, &StationListWidget::onSuggestBtnClicked);
     connect(m_regionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &StationListWidget::onRegionSelected);
-
-    // 地址联想下拉：输入关键字 -> 300ms 防抖 -> 腾讯地点联想 -> QCompleter 弹出候选
-    m_suggestModel = new QStringListModel(this);
-    m_suggestCompleter = new QCompleter(m_suggestModel, this);
-    m_suggestCompleter->setCaseSensitivity(Qt::CaseInsensitive);
-    m_suggestCompleter->setCompletionMode(QCompleter::PopupCompletion);
-    m_suggestCompleter->setMaxVisibleItems(8);
-    m_addressEdit->setCompleter(m_suggestCompleter);
+    connect(m_mapPicker, &MapPickerWidget::pointPicked,
+            this, &StationListWidget::onMapPicked);
+    // 输入框失焦（点"定位"/点地图等）时收起下拉
+    connect(m_addressEdit, &QLineEdit::editingFinished, this, [this]() {
+        hideSuggestPopup();
+    });
 
     m_suggestTimer = new QTimer(this);
     m_suggestTimer->setSingleShot(true);
     m_suggestTimer->setInterval(300);
     connect(m_suggestTimer, &QTimer::timeout, this, &StationListWidget::doSuggest);
     connect(m_addressEdit, &QLineEdit::textChanged, this, &StationListWidget::onAddressTextChanged);
-    connect(m_suggestCompleter, QOverload<const QString&>::of(&QCompleter::activated),
-            this, &StationListWidget::onSuggestionPicked);
+    // 用 itemPressed：Tool 弹窗第一下点击被窗口激活吃掉，按下即选中只需单击
+    connect(m_suggestList, &QListWidget::itemPressed,
+            this, &StationListWidget::onSuggestionItemClicked);
+    connect(m_addressEdit, &QLineEdit::returnPressed, this, [this]() {
+        // 回车：有候选选第一个，没有候选走全文地址定位
+        if (m_suggestPopup->isVisible() && m_suggestList->count() > 0) {
+            onSuggestionPicked(m_suggestList->item(0)->text());
+        } else {
+            onLocateByAddress();
+        }
+    });
 
     // 需求4：点击整张卡片即进入该充电站详情
     connect(m_listWidget, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
@@ -116,9 +140,19 @@ void StationListWidget::setStatus(const QString& text, bool ok) {
         : QStringLiteral("color: #c62828;"));
 }
 
+void StationListWidget::updatePosLabel(double lat, double lng, const QString& name) {
+    m_posLabel->setText(QStringLiteral("📍 当前位置：%1, %2　（%3）")
+                            .arg(lat, 0, 'f', 6)
+                            .arg(lng, 0, 'f', 6)
+                            .arg(name));
+}
+
 void StationListWidget::refreshNearby() {
     if (!AppSession::instance().isLoggedIn()) return;
-    queryNearby(AppSession::instance().latitude(), AppSession::instance().longitude());
+    const double lat = AppSession::instance().latitude();
+    const double lng = AppSession::instance().longitude();
+    m_mapPicker->centerOn(lat, lng);
+    queryNearby(lat, lng);
 }
 
 void StationListWidget::onLocateByAddress() {
@@ -129,27 +163,39 @@ void StationListWidget::onLocateByAddress() {
     }
 
     m_locateAddrBtn->setEnabled(false);
+    hideSuggestPopup();
     setStatus(QStringLiteral("正在调用腾讯地图定位…"), true);
 
     MapApi::instance().geocode(address, [this, address](bool ok, double lat, double lng,
+                                                        int reliability, int deviation,
                                                         const QString& msg) {
         m_locateAddrBtn->setEnabled(true);
         if (!ok) {
-            setStatus(QStringLiteral("定位失败：%1（可改用下方'按坐标查询'手动输入）").arg(msg), false);
+            setStatus(QStringLiteral("定位失败：%1（可改输入更短的关键字，用下拉候选精确定位）").arg(msg), false);
             return;
         }
         AppSession::instance().setPosition(lat, lng, address);
-        m_latSpin->setValue(lat);
-        m_lngSpin->setValue(lng);
+        m_mapPicker->centerOn(lat, lng);
+        updatePosLabel(lat, lng, address);
         queryNearby(lat, lng);
+
+        // 匹配置信度低（reliability < 7 或偏差 >= 500 米）：
+        // 提示偏差，并自动弹出联想候选供用户选择更精确的地点
+        if (reliability < 7 || deviation >= 500) {
+            setStatus(QStringLiteral("该地址匹配可能不够精确（偏差约 %1 米），"
+                                     "可在下方下拉候选中选择更准确的地点").arg(deviation), false);
+            doSuggest();
+        }
     });
 }
 
-void StationListWidget::onLocateByCoords() {
-    double lat = m_latSpin->value();
-    double lng = m_lngSpin->value();
-    AppSession::instance().setPosition(lat, lng, QStringLiteral("手动坐标"));
-    queryNearby(lat, lng);
+void StationListWidget::onSuggestBtnClicked() {
+    if (m_addressEdit->text().trimmed().size() < 2) {
+        setStatus(QStringLiteral("请先输入至少 2 个字（如：北京理工），再点候选"), false);
+        return;
+    }
+    m_suggestTimer->stop();
+    doSuggest();   // 立即请求并弹出候选
 }
 
 void StationListWidget::onRegionSelected(int index) {
@@ -161,16 +207,16 @@ void StationListWidget::onRegionSelected(int index) {
     const double lat = parts[0].toDouble();
     const double lng = parts[1].toDouble();
     AppSession::instance().setPosition(lat, lng, m_regionCombo->currentText());
-    m_latSpin->setValue(lat);
-    m_lngSpin->setValue(lng);
+    m_mapPicker->centerOn(lat, lng);
+    updatePosLabel(lat, lng, m_regionCombo->currentText());
     queryNearby(lat, lng);
 }
 
 void StationListWidget::onAddressTextChanged(const QString& text) {
     if (m_suppressSuggest) return;
+    hideSuggestPopup();
     if (text.trimmed().size() < 2) {
         m_suggestTimer->stop();
-        m_suggestModel->setStringList({});
         return;
     }
     m_suggestTimer->start();   // 防抖：停止输入 300ms 后才发请求
@@ -182,9 +228,14 @@ void StationListWidget::doSuggest() {
 
     // 联想范围固定为北京（与演示数据一致）；region 参数预留给 MapApi 扩展
     MapApi::instance().suggest(keyword, QStringLiteral("北京"),
-        [this](bool ok, const QJsonArray& items, const QString& /*msg*/) {
+        [this](bool ok, const QJsonArray& items, const QString& msg) {
             if (!ok) {
-                m_suggestModel->setStringList({});
+                hideSuggestPopup();
+                setStatus(QStringLiteral("地址联想暂不可用：%1").arg(msg), false);
+                return;
+            }
+            if (items.isEmpty()) {
+                hideSuggestPopup();
                 return;
             }
             QStringList titles;
@@ -192,19 +243,42 @@ void StationListWidget::doSuggest() {
             for (const auto& v : items) {
                 const QJsonObject it = v.toObject();
                 const QString title = it.value("title").toString();
+                const QString district = it.value("district").toString();
                 const QString addr = it.value("address").toString();
-                // 标题可能重复（不同城区同名地点），拼上地址用于区分
-                const QString display = addr.isEmpty() ? title
-                                                       : QStringLiteral("%1（%2）").arg(title, addr);
+                // 展示格式：北京理工大学中关村校区（海淀区）；区名为空时退回用地址区分
+                const QString display = district.isEmpty()
+                    ? (addr.isEmpty() ? title : QStringLiteral("%1（%2）").arg(title, addr))
+                    : QStringLiteral("%1（%2）").arg(title, district);
                 m_suggestItems.insert(display, it);
                 titles << display;
             }
-            m_suggestModel->setStringList(titles);
-            m_suggestCompleter->complete();   // 弹出候选
+            showSuggestPopup(titles);
         });
 }
 
+void StationListWidget::showSuggestPopup(const QStringList& titles) {
+    m_suggestList->clear();
+    for (const QString& t : titles) m_suggestList->addItem(t);
+
+    const int itemH = 30;
+    const int h = qMin(titles.size(), 8) * itemH + 10;
+    m_suggestPopup->setFixedSize(m_addressEdit->width(), h);
+    m_suggestPopup->move(m_addressEdit->mapToGlobal(QPoint(0, m_addressEdit->height() + 2)));
+    m_suggestPopup->show();
+    m_suggestPopup->raise();
+}
+
+void StationListWidget::hideSuggestPopup() {
+    m_suggestPopup->hide();
+}
+
+void StationListWidget::onSuggestionItemClicked(QListWidgetItem* item) {
+    if (!item) return;
+    onSuggestionPicked(item->text());
+}
+
 void StationListWidget::onSuggestionPicked(const QString& display) {
+    hideSuggestPopup();
     const auto it = m_suggestItems.constFind(display);
     if (it == m_suggestItems.constEnd()) return;
 
@@ -219,8 +293,15 @@ void StationListWidget::onSuggestionPicked(const QString& display) {
     m_suppressSuggest = false;
 
     AppSession::instance().setPosition(lat, lng, title);
-    m_latSpin->setValue(lat);
-    m_lngSpin->setValue(lng);
+    m_mapPicker->centerOn(lat, lng);
+    updatePosLabel(lat, lng, title);
+    queryNearby(lat, lng);
+}
+
+// 地图二次选点：用户在地图上点击的位置作为最终经纬度
+void StationListWidget::onMapPicked(double lat, double lng) {
+    AppSession::instance().setPosition(lat, lng, QStringLiteral("地图选点"));
+    updatePosLabel(lat, lng, QStringLiteral("地图选点"));
     queryNearby(lat, lng);
 }
 
@@ -262,27 +343,36 @@ void StationListWidget::queryNearbyFallback() {
 void StationListWidget::renderStations(const QJsonArray& stations, bool routeOk) {
     m_listWidget->clear();
     if (stations.isEmpty()) {
+        m_mapPicker->showStations(QJsonArray());
         setStatus(QStringLiteral("附近暂无充电站"), false);
         return;
     }
 
-    QString recoName, fastName;
-    double fastMin = 0.0;
+    QString recoName;
+    double recoMin = 0.0;
+    QJsonArray markers;
     for (const auto& v : stations) {
         const QJsonObject s = v.toObject();
-        if (s.value("recommend").toBool()) recoName = s.value("name").toString();
-        if (s.value("fastest").toBool()) {
-            fastName = s.value("name").toString();
-            fastMin = s.value("drive_min").toDouble();
+        if (s.value("recommend").toBool()) {
+            recoName = s.value("name").toString();
+            recoMin = s.value("drive_min").toDouble();
         }
+        // 地图标记用字段
+        QJsonObject m;
+        m["lat"] = s.value("lat").toDouble();
+        m["lng"] = s.value("lng").toDouble();
+        m["name"] = s.value("name").toString();
+        markers.append(m);
         addStationCard(s);
     }
+    m_mapPicker->showStations(markers);
 
+    // 服务端排序：综合推荐第一，其余按到达时间升序
     QString status = QStringLiteral("共找到 %1 座充电站").arg(stations.size());
-    if (!recoName.isEmpty() && !fastName.isEmpty()) {
-        status += QStringLiteral(" · 综合推荐：%1 · 最快到达：%2（约%3分钟）")
-                      .arg(recoName, fastName)
-                      .arg(fastMin, 0, 'f', 0);
+    if (!recoName.isEmpty()) {
+        status += QStringLiteral(" · 综合推荐：%1（驾车约%2分钟）")
+                      .arg(recoName)
+                      .arg(recoMin, 0, 'f', 0);
     } else {
         status += QStringLiteral("（按距离由近及远）");
     }
@@ -313,20 +403,14 @@ void StationListWidget::addStationCard(const QJsonObject& station) {
     name->setFont(f);
     topRow->addWidget(name);
 
-    // 需求20：综合推荐 / 最快到达 徽章
-    const auto addBadge = [frame](QHBoxLayout* row, const QString& text, bool green) {
-        auto* badge = new QLabel(text, frame);
-        badge->setStyleSheet(green
-            ? QStringLiteral("background: #e8f5e9; color: #2e7d32; border-radius: 8px;"
-                             " padding: 1px 6px; font-size: 10px;")
-            : QStringLiteral("background: #e3f2fd; color: #1565c0; border-radius: 8px;"
-                             " padding: 1px 6px; font-size: 10px;"));
-        row->addWidget(badge);
-    };
-    if (station.value("recommend").toBool())
-        addBadge(topRow, QStringLiteral("综合推荐"), true);
-    if (station.value("fastest").toBool())
-        addBadge(topRow, QStringLiteral("最快到达"), false);
+    // 需求20：综合推荐徽章（第一位）
+    if (station.value("recommend").toBool()) {
+        auto* badge = new QLabel(QStringLiteral("综合推荐"), frame);
+        badge->setStyleSheet(QStringLiteral(
+            "background: #e8f5e9; color: #2e7d32; border-radius: 8px;"
+            " padding: 1px 6px; font-size: 10px;"));
+        topRow->addWidget(badge);
+    }
     topRow->addStretch(1);
 
     // 需求5：点击"距离"亦可发起导航（矩阵要求：点击距离或导航按钮）；

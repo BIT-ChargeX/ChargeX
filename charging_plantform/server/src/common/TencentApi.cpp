@@ -53,7 +53,7 @@ QVector<RouteInfo> drivingMatrix(double fromLat, double fromLng,
     QTimer timer;
     timer.setSingleShot(true);
     QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-    timer.start(10000);   // 与 AliyunSms 一致：10s 超时
+    timer.start(10000);   // 10s 超时
 
     loop.exec();
 

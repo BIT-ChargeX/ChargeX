@@ -11,7 +11,7 @@ inline constexpr int kPort = 9000;
 
 // 腾讯地图 WebService Key：演示前填入真实 key；
 // 留空时定位自动降级为"手动输入经纬度"，不影响其余功能。
-inline constexpr const char* kTencentMapKey = "U66BZ-DBO6U-H5AVC-GWFDF-BY7EO-LQFOX";
+inline constexpr const char* kTencentMapKey = "4AFBZ-EOV63-NSS3K-OK2GL-WS7RQ-7UF7V";
 inline constexpr const char* kTencentMapReferer = "ChargingClient";
 inline constexpr const char* kTencentGeocoderUrl = "https://apis.map.qq.com/ws/geocoder/v1/";
 inline constexpr const char* kTencentRouteUrl = "https://apis.map.qq.com/uri/v1/routeplan";

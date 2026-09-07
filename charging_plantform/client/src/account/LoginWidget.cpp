@@ -90,66 +90,6 @@ void LoginWidget::onNetStateChanged(int state) {
     }
 }
 
-void LoginWidget::startCountdown() {
-    m_countdown = 60;
-    m_sendCodeBtn->setEnabled(false);
-    onCountdownTick();
-    m_countdownTimer->start();
-}
-
-void LoginWidget::onCountdownTick() {
-    if (m_countdown > 0) {
-        m_sendCodeBtn->setText(QStringLiteral("%1秒后重发").arg(m_countdown));
-        --m_countdown;
-    } else {
-        m_countdownTimer->stop();
-        m_sendCodeBtn->setEnabled(!m_busy);
-        m_sendCodeBtn->setText(QStringLiteral("获取验证码"));
-    }
-}
-
-void LoginWidget::onSendCodeClicked() {
-    if (m_busy) return;
-
-    const QString phone = m_phoneEdit->text().trimmed();
-    static const QRegularExpression re(QStringLiteral("^1[0-9]{10}$"));
-    if (!re.match(phone).hasMatch()) {
-        m_phoneEdit->clear();
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("手机号格式不正确（需11位数字，1开头）"));
-        return;
-    }
-
-    if (!NetClient::instance().isConnected()) {
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("服务器未连接，无法获取验证码"));
-        return;
-    }
-
-    m_sendCodeBtn->setEnabled(false);   // 防止重复点击重复计费
-    m_hintLabel->clear();
-
-    QJsonObject data;
-    data["phone"] = phone;
-    NetClient::instance().sendRequest(Api::CmdUserSendCode, data,
-        [this](const QJsonObject& resp, int code, const QString& msg) {
-            if (code != 0) {
-                m_sendCodeBtn->setEnabled(true);
-                m_hintLabel->setText(QStringLiteral("获取验证码失败：%1").arg(msg));
-                return;
-            }
-            // 演示模式：服务端未配置短信凭证时下发验证码，直接填入输入框
-            const QString devCode = resp.value("dev_code").toString();
-            if (!devCode.isEmpty()) {
-                m_codeEdit->setText(devCode);
-                m_hintLabel->setText(QStringLiteral("演示模式：验证码已自动填入"));
-            } else {
-                m_hintLabel->setText(QStringLiteral("验证码已发送，请注意查收短信"));
-            }
-            startCountdown();
-        });
-}
-
 // 【需求1 - 登录/注册】点击"登录/注册"按钮：
 // 1) 校验手机号格式（11 位、1 开头），不合法则弹提示并清空手机号，流程结束；
 // 2) 校验密码非空，为空则弹提示；

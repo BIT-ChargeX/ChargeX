@@ -14,8 +14,10 @@ class QNetworkReply;
 class MapApi : public QObject {
     Q_OBJECT
 public:
+    // reliability: 腾讯返回的可信度(1-10)；deviation: 定位偏差半径(米)
     using GeocodeCallback =
-        std::function<void(bool ok, double lat, double lng, const QString& msg)>;
+        std::function<void(bool ok, double lat, double lng, int reliability,
+                           int deviation, const QString& msg)>;
     // 候选列表：[{title, address, lat, lng}, ...]
     using SuggestCallback =
         std::function<void(bool ok, const QJsonArray& items, const QString& msg)>;

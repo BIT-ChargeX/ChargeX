@@ -267,11 +267,15 @@ Api::Reply StationService::recommend(const QJsonObject& data) {
         if (t[i] < t[fastIdx]) fastIdx = i;
     }
 
-    // 4) 按综合分降序输出；recommend/fastest 徽章标记两张特殊卡片
+    // 4) 输出顺序：综合得分最高的站排第一（推荐位），其余按驾车时长升序
     QVector<int> order(n);
     for (int i = 0; i < n; ++i) order[i] = i;
-    std::sort(order.begin(), order.end(),
-              [&score](int a, int b) { return score[a] > score[b]; });
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        const bool aRec = (a == recoIdx);
+        const bool bRec = (b == recoIdx);
+        if (aRec != bRec) return aRec;   // 推荐位永远第一
+        return t[a] < t[b];              // 其余按所需时间升序
+    });
 
     QJsonArray arr;
     for (const int i : order) {
