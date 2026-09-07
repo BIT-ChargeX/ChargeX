@@ -4,12 +4,13 @@
 #include <QPair>
 #include <QColor>
 #include <QStringList>
-#include <QSet>
 
 class QMouseEvent;
 
 // 依赖 Qt Widgets 的轻量图表（QPainter 自绘，不依赖 QtCharts 可选模块）。
-// PieChartWidget：环形状态分布图 + 右侧图例；图例行可点击显隐对应分类。
+// PieChartWidget：环形状态分布图 + 右侧图例。
+// 三个模块始终完整展示；点击图例行或扇形可“高亮”该分类（扇区外弹 + 其余变淡），
+// 再次点击同一分类恢复三块等权展示（不隐藏、不重算比例）。
 class PieChartWidget : public QWidget {
     Q_OBJECT
 public:
@@ -23,13 +24,13 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
 
 private:
-    void toggle(int index);
-    bool isHidden(int index) const;
+    void toggleHighlight(int index);
+    int hitSlice(int x, int y) const;
 
     QVector<QPair<QString, int>> m_items;
     QVector<QColor> m_colors;
-    QSet<int> m_hidden;
     int m_total = 0;
+    int m_highlight = -1;   // -1 = 不高亮；否则为高亮分类下标
 };
 
 // BarChartWidget：竖向柱状图 + 刻度线 + 数值/类别标签
