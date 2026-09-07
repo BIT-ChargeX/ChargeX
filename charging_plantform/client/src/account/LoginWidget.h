@@ -5,8 +5,8 @@ class QLineEdit;
 class QPushButton;
 class QLabel;
 
-// 账户模块-需求1：手机号+密码登录（首次登录自动注册）
-// 命令：USER_LOGIN（携带 phone + password）
+// 账户模块-需求1：手机号+密码登录；注册通过弹窗完成
+// 命令：USER_LOGIN（携带 phone + password）、USER_REGISTER
 class LoginWidget : public QWidget {
     Q_OBJECT
 public:
@@ -19,6 +19,7 @@ signals:
 
 private slots:
     void onLoginClicked();
+    void onRegisterClicked();
     void onNetStateChanged(int state);
 
 private:
@@ -27,6 +28,7 @@ private:
     QLineEdit* m_phoneEdit;
     QLineEdit* m_passwordEdit;
     QPushButton* m_loginBtn;
+    QPushButton* m_registerBtn;
     QLabel* m_hintLabel;
     QLabel* m_connLabel;
     bool m_busy = false;

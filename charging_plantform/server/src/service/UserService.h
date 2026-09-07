@@ -2,10 +2,11 @@
 #include <QJsonObject>
 #include "ApiDefs.h"
 
-// 用户账户服务：需求1(登录/自动注册) / 6(资料维护) / 7(余额充值) / 碳积分与兑换
+// 用户账户服务：需求1(登录/注册) / 6(资料维护) / 7(余额充值)/ 碳积分与兑换
 namespace UserService {
 
 Api::Reply login(const QJsonObject& data);
+Api::Reply registerUser(const QJsonObject& data);
 Api::Reply updateProfile(const QJsonObject& data);
 Api::Reply uploadAvatar(const QJsonObject& data);   // 头像上传：base64 -> MinIO -> 存 URL
 Api::Reply recharge(const QJsonObject& data);
