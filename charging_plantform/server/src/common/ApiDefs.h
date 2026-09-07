@@ -16,15 +16,27 @@ inline constexpr const char* CmdUserRegister       = "USER_REGISTER";  // 注册
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
+inline constexpr const char* CmdAvatarUpload       = "AVATAR_UPLOAD";   // 头像上传：base64 图片 -> MinIO -> 存 URL
+inline constexpr const char* CmdUserRechargeRecords= "USER_RECHARGE_RECORDS"; // 充值记录查询
+inline constexpr const char* CmdUserCarbonStats    = "USER_CARBON_STATS";    // 碳积分与环保足迹
+inline constexpr const char* CmdUserPointsDetail   = "USER_POINTS_DETAIL";   // 积分明细列表
+inline constexpr const char* CmdUserPointsRedeem   = "USER_POINTS_REDEEM";   // 积分兑换
 // 充电站 / 电桩查询
 inline constexpr const char* CmdStationNearby      = "STATION_NEARBY";
 inline constexpr const char* CmdStationDetail      = "STATION_DETAIL";
 inline constexpr const char* CmdPileDetailList     = "PILE_DETAIL_LIST";
+// 综合推荐（需求20 智能充电站推荐）：直线距离Top5 -> 腾讯驾车矩阵 -> 加权评分排序
+inline constexpr const char* CmdStationRecommend   = "STATION_RECOMMEND";
+
+// ---- 腾讯地图 WebService（服务端调用，需外网）----
+inline constexpr const char* kTencentMapKey = "4AFBZ-EOV63-NSS3K-OK2GL-WS7RQ-7UF7V";
+inline constexpr const char* kTencentMatrixUrl = "https://apis.map.qq.com/ws/distance/v1/matrix/";
 // 充电业务
 inline constexpr const char* CmdOrderCheckUnfinished = "ORDER_CHECK_UNFINISHED";
 inline constexpr const char* CmdOrderReserve          = "ORDER_RESERVE";
 inline constexpr const char* CmdOrderCreate           = "ORDER_CREATE";
 inline constexpr const char* CmdOrderSettle           = "ORDER_SETTLE";   // 结算：服务端计算费用并扣减余额
+inline constexpr const char* CmdOrderList             = "ORDER_LIST";     // 我的订单：查询用户全部充电订单
 // 管理端（除 ADMIN_LOGIN/ADMIN_LOGOUT 外，请求 data 均需携带 token：
 // ADMIN_LOGIN 成功后返回 token，分发器对管理命令做会话校验）
 inline constexpr const char* CmdAdminLogin       = "ADMIN_LOGIN";
@@ -38,6 +50,8 @@ inline constexpr const char* CmdPileMonSummary   = "PILE_MON_SUMMARY";
 inline constexpr const char* CmdOpsLogList       = "OPS_LOG_LIST";
 inline constexpr const char* CmdStationMgmtList  = "STATION_MGMT_LIST";
 inline constexpr const char* CmdStationMgmtAdd   = "STATION_MGMT_ADD";
+// SALES_SUMMARY：入参 days(7/30) 或 start/end(yyyy-MM-dd,≤366天)；
+// 返回 today/month/total(+today_pct/month_pct 环比,-1 无基线)、daily[]、top_stations[]
 inline constexpr const char* CmdSalesSummary     = "SALES_SUMMARY";
 // 管理端查询充电桩终端实时运行日志（需 token）
 inline constexpr const char* CmdPileRuntimeLogList = "PILE_RUNTIME_LOG_LIST";

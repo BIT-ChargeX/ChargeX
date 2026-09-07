@@ -9,5 +9,6 @@ Api::Reply checkUnfinished(const QJsonObject& data);
 Api::Reply reserve(const QJsonObject& data);
 Api::Reply create(const QJsonObject& data);
 Api::Reply settle(const QJsonObject& data);   // ORDER_SETTLE
+Api::Reply listOrders(const QJsonObject& data);   // ORDER_LIST：查询用户全部订单
 
 }

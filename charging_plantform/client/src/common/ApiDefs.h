@@ -11,10 +11,12 @@ inline constexpr int kPort = 9000;
 
 // 腾讯地图 WebService Key：演示前填入真实 key；
 // 留空时定位自动降级为"手动输入经纬度"，不影响其余功能。
-inline constexpr const char* kTencentMapKey = "";
+inline constexpr const char* kTencentMapKey = "4AFBZ-EOV63-NSS3K-OK2GL-WS7RQ-7UF7V";
 inline constexpr const char* kTencentMapReferer = "ChargingClient";
 inline constexpr const char* kTencentGeocoderUrl = "https://apis.map.qq.com/ws/geocoder/v1/";
 inline constexpr const char* kTencentRouteUrl = "https://apis.map.qq.com/uri/v1/routeplan";
+// 地点联想（地址输入框关键字下拉提示）
+inline constexpr const char* kTencentSuggestionUrl = "https://apis.map.qq.com/ws/place/v1/suggestion/";
 
 // ---- 命令码 ----
 // 账户
@@ -23,15 +25,23 @@ inline constexpr const char* CmdUserRegister       = "USER_REGISTER";  // 注册
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
+inline constexpr const char* CmdAvatarUpload       = "AVATAR_UPLOAD";   // 头像上传：base64 图片 -> 服务端 -> MinIO
+inline constexpr const char* CmdUserRechargeRecords= "USER_RECHARGE_RECORDS"; // 充值记录查询
+inline constexpr const char* CmdUserCarbonStats    = "USER_CARBON_STATS";    // 碳积分与环保足迹
+inline constexpr const char* CmdUserPointsDetail   = "USER_POINTS_DETAIL";   // 积分明细列表
+inline constexpr const char* CmdUserPointsRedeem   = "USER_POINTS_REDEEM";   // 积分兑换
 // 充电站 / 电桩（刘恩东）
 inline constexpr const char* CmdStationNearby      = "STATION_NEARBY";
 inline constexpr const char* CmdStationDetail      = "STATION_DETAIL";
 inline constexpr const char* CmdPileDetailList     = "PILE_DETAIL_LIST";
+// 综合推荐（需求20）：服务端按 驾车距离/时长/价格/空闲率 加权评分排序
+inline constexpr const char* CmdStationRecommend   = "STATION_RECOMMEND";
 // 充电业务（孙晟云）
 inline constexpr const char* CmdOrderCheckUnfinished = "ORDER_CHECK_UNFINISHED";
 inline constexpr const char* CmdOrderReserve          = "ORDER_RESERVE";
 inline constexpr const char* CmdOrderCreate           = "ORDER_CREATE";
 inline constexpr const char* CmdOrderSettle           = "ORDER_SETTLE";
+inline constexpr const char* CmdOrderList             = "ORDER_LIST";   // 我的订单：查询用户全部充电订单
 // 注：ORDER_SETTLE 结算/扣费/释放电桩的业务逻辑在服务端（OrderService::settle）
 // 结算命令 ORDER_SETTLE 协议 v1.1 尚未冻结，冻结前服务端不会响应，客户端不主动发送。
 

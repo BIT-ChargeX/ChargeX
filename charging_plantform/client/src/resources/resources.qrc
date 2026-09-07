@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/resources">
+        <file>map_picker.html</file>
+    </qresource>
+</RCC>

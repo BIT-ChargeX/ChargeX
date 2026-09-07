@@ -3,21 +3,111 @@
 
 #include <QPainter>
 #include <QPaintEvent>
+#include <QMouseEvent>
 #include <QFont>
 #include <QtMath>
+
+namespace {
+constexpr qreal kPi = 3.14159265358979323846;
+}
 
 // ================= PieChartWidget =================
 PieChartWidget::PieChartWidget(QWidget* parent) : QWidget(parent) {
     setMinimumHeight(220);
+    setMouseTracking(false);
 }
 
 void PieChartWidget::setData(const QVector<QPair<QString, int>>& items,
                              const QVector<QColor>& colors) {
+    // 数据分类变化时重置高亮；否则保留（跨轮询刷新不丢）
+    bool sameKeys = m_items.size() == items.size();
+    if (sameKeys) {
+        for (int i = 0; i < m_items.size(); ++i) {
+            if (m_items[i].first != items[i].first) { sameKeys = false; break; }
+        }
+    }
+    if (!sameKeys) m_highlight = -1;
+
     m_items = items;
     m_colors = colors;
     m_total = 0;
     for (const auto& it : items) m_total += it.second;
     update();
+}
+
+void PieChartWidget::toggleHighlight(int index) {
+    if (index < 0 || index >= m_items.size()) return;
+    m_highlight = (m_highlight == index) ? -1 : index;   // 再点一次取消
+    update();
+}
+
+// 命中检测：返回点击所在的分类下标；未命中返回 -1
+int PieChartWidget::hitSlice(int x, int y) const {
+    if (m_total <= 0 || m_items.isEmpty()) return -1;
+
+    const int w = width();
+    const int h = height();
+    const int legendW = qMax(150, w / 3);
+    const int chartW = w - legendW - 16;
+    const int side = qMax(60, qMin(chartW, h - 20));
+    const qreal cx = (chartW - side) / 2.0 + side / 2.0;
+    const qreal cy = (h - side) / 2.0 + side / 2.0;
+
+    const qreal dx = x - cx;
+    const qreal dy = y - cy;
+    const qreal r = qSqrt(dx * dx + dy * dy);
+    const qreal outer = side / 2.0;
+    // 内孔：沿用既有环形挖孔比例（circle.adjusted(±0.38) → 内半径 = outer*0.24）
+    const qreal inner = side * 0.12;
+    if (r > outer || r < inner) return -1;
+
+    // 屏幕角(0°=3点,+y向下) 换算为“自正上方顺时针旋转”的度数
+    qreal ang = qAtan2(-dy, dx) * 180.0 / kPi;
+    if (ang < 0) ang += 360.0;
+    qreal rot = 90.0 - ang;
+    while (rot < 0.0) rot += 360.0;
+    while (rot >= 360.0) rot -= 360.0;
+
+    qreal cum = 0.0;
+    for (int i = 0; i < m_items.size(); ++i) {
+        const qreal span = 360.0 * m_items[i].second / m_total;
+        if (span <= 0.0) continue;
+        if (rot >= cum && rot < cum + span) return i;
+        cum += span;
+    }
+    return -1;
+}
+
+void PieChartWidget::mousePressEvent(QMouseEvent* event) {
+    if (m_total <= 0) {
+        QWidget::mousePressEvent(event);
+        return;
+    }
+    const int w = width();
+    const int legendW = qMax(150, w / 3);
+    const int legendX = w - legendW;
+    const int x = static_cast<int>(event->position().x());
+    const int y = static_cast<int>(event->position().y());
+
+    // 1) 图例行
+    if (x >= legendX) {
+        for (int i = 0; i < m_items.size(); ++i) {
+            const int rowTop = 42 + i * 24;
+            if (y >= rowTop - 6 && y <= rowTop + 20) {
+                toggleHighlight(i);
+                event->accept();
+                return;
+            }
+        }
+    }
+    // 2) 直接点扇形
+    const int slice = hitSlice(x, y);
+    if (slice >= 0) {
+        toggleHighlight(slice);
+        event->accept();
+        return;
+    }
+    QWidget::mousePressEvent(event);
 }
 
 void PieChartWidget::paintEvent(QPaintEvent*) {
@@ -33,6 +123,7 @@ void PieChartWidget::paintEvent(QPaintEvent*) {
     const int chartW = w - legendW - 16;
     const int side = qMax(60, qMin(chartW, h - 20));
     QRectF circle((chartW - side) / 2.0, (h - side) / 2.0, side, side);
+    const int legendX = w - legendW;
 
     if (m_total <= 0) {
         p.setPen(Theme::textMuted());
@@ -42,28 +133,44 @@ void PieChartWidget::paintEvent(QPaintEvent*) {
         return;
     }
 
-    // 环形占比（先整圆切分，再内挖底色形成环）
-    const qreal penW = 2.0;
-    p.setPen(QPen(Theme::card(), penW));
-    qreal start = 90.0;   // 从正上方开始
+    // ---- 环图：三模块始终完整，比例恒按总数 ----
+    // 每段以“外扇形填色 + 内孔扇形填底色”独立成环；高亮段整体外移、其余变淡
+    const qreal explode = qMax(side * 0.06, 8.0);
+    qreal aStart = 90.0;   // 自正上方开始、顺时针
+
     for (int i = 0; i < m_items.size(); ++i) {
-        if (m_items[i].second <= 0) continue;
         const qreal span = 360.0 * m_items[i].second / m_total;
-        const QColor c = i < m_colors.size() ? m_colors[i] : Theme::textMuted();
+        if (span <= 0.0) { aStart -= span; continue; }
+
+        const qreal mid = aStart - span / 2.0;   // 与 drawPie 同标度
+        const qreal dirX = qCos(mid * kPi / 180.0);
+        const qreal dirY = -qSin(mid * kPi / 180.0);   // 屏幕 y 向下
+
+        QRectF arc = circle;
+        QColor c = i < m_colors.size() ? m_colors[i] : Theme::textMuted();
+        if (m_highlight >= 0) {
+            if (i == m_highlight) {
+                arc.translate(dirX * explode, dirY * explode);
+            } else {
+                c.setAlphaF(0.35);
+            }
+        }
+
+        QRectF innerArc = arc.adjusted(arc.width() * 0.38, arc.height() * 0.38,
+                                       -arc.width() * 0.38, -arc.height() * 0.38);
+
+        p.setPen(QPen(Theme::card(), 1.5));
         p.setBrush(c);
-        p.drawPie(circle, static_cast<int>(start * 16), static_cast<int>(-span * 16));
-        start -= span;
+        p.drawPie(arc, static_cast<int>(aStart * 16), static_cast<int>(-span * 16));
+
+        p.setPen(Qt::NoPen);
+        p.setBrush(Theme::card());
+        p.drawPie(innerArc, static_cast<int>(aStart * 16), static_cast<int>(-span * 16));
+
+        aStart -= span;
     }
 
-    // 挖孔成环
-    QRectF inner = circle.adjusted(circle.width() * 0.38, circle.height() * 0.38,
-                                   -circle.width() * 0.38, -circle.height() * 0.38);
-    p.setPen(Qt::NoPen);
-    p.setBrush(Theme::card());
-    p.drawEllipse(inner);
-
-    // 右侧图例：首行 = 电桩总数（合计）
-    const int legendX = w - legendW;
+    // ---- 图例：首行 = 电桩总数（合计） ----
     p.setPen(Qt::NoPen);
     p.setBrush(Theme::textPrimary());
     p.drawRoundedRect(QRect(legendX + 6, 14, 12, 12), 2, 2);
@@ -79,21 +186,29 @@ void PieChartWidget::paintEvent(QPaintEvent*) {
     p.drawText(QRect(legendX + 90, 11, legendW - 96, 18),
                Qt::AlignRight | Qt::AlignVCenter, QString::number(m_total));
 
-    // 分类图例
-    p.setFont(font());
+    // 分类图例：高亮行实色+加粗深字；非高亮行稍淡
     int ly = 42;
     for (int i = 0; i < m_items.size(); ++i) {
-        const QColor c = i < m_colors.size() ? m_colors[i] : Theme::textMuted();
+        const bool lit = (m_highlight == i);
+        QColor c = i < m_colors.size() ? m_colors[i] : Theme::textMuted();
+        if (m_highlight >= 0 && !lit) c.setAlphaF(0.45);
+
         p.setPen(Qt::NoPen);
         p.setBrush(c);
-        p.drawRoundedRect(QRect(legendX + 6, ly, 12, 12), 2, 2);
+        p.drawRoundedRect(QRectF(legendX + 6, ly, 12, 12), 2, 2);
 
+        QFont rowFont = font();
+        if (lit) {
+            rowFont.setBold(true);
+            rowFont.setPixelSize(13);
+        }
+        p.setFont(rowFont);
         const double pct = m_total > 0 ? m_items[i].second * 100.0 / m_total : 0.0;
         const QString text = QStringLiteral("%1  %2 · %3%")
                                  .arg(m_items[i].first)
                                  .arg(m_items[i].second)
                                  .arg(pct, 0, 'f', 1);
-        p.setPen(Theme::textSecondary());
+        p.setPen(lit ? Theme::textPrimary() : Theme::textSecondary());
         p.drawText(QRect(legendX + 24, ly - 3, legendW - 30, 20),
                    Qt::AlignLeft | Qt::AlignVCenter, text);
         ly += 24;

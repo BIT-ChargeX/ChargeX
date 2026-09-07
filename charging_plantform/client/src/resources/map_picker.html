@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+#container { width: 100%; height: 100%; }
+#fallback { display: none; padding: 40px 16px; color: #888; text-align: center; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="container"></div>
+<div id="fallback">地图加载失败：请确认腾讯地图 key 已开通 JavaScript API GL 权限，且网络可用</div>
+
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="https://map.qq.com/api/gljs?v=1.exp&key=__TENCENT_KEY__"></script>
+<script>
+var map = null;          // 地图实例（懒创建：容器可见且有尺寸时才创建）
+var meMarker = null;     // 用户位置标记（MultiMarker，SVG data-URI 图标）
+var stationLayer = null; // 推荐站点标记层
+var bridge = null;       // C++ 侧桥接对象
+var pendingCenter = { lat: 39.908823, lng: 116.397470 };
+var pendingStations = null;
+
+// 生成圆形 SVG 图标（data URI，不依赖外部图片资源）
+function pinSvg(color, size) {
+    var half = size / 2;
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '">' +
+              '<circle cx="' + half + '" cy="' + half + '" r="' + (half - 2) + '" fill="' + color +
+              '" stroke="#ffffff" stroke-width="2"/>' +
+              '</svg>';
+    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+}
+
+// 建立 QWebChannel 桥接：页面 JS <-> Qt C++
+new QWebChannel(qt.webChannelTransport, function (channel) {
+    bridge = channel.objects.bridge;
+    init();
+});
+
+function init() {
+    // 只通知 C++ 页面已就绪；地图本体延后到 ensureMap（容器可见后再创建）
+    if (bridge) bridge.ready();
+}
+
+// 调试/自测钩子：直接回传坐标（与地图点击同一条 bridge 链路）
+window.__testPick = function (lat, lng) {
+    if (bridge) bridge.pick(lat, lng);
+    return bridge ? 'bridge_ok' : 'bridge_missing';
+};
+
+function showFallback() {
+    document.getElementById('container').style.display = 'none';
+    document.getElementById('fallback').style.display = 'block';
+}
+
+function ensureMap(lat, lng) {
+    if (map) return true;
+    if (typeof TMap === 'undefined') { showFallback(); return false; }
+    var c = document.getElementById('container');
+    if (c.clientWidth === 0 || c.clientHeight === 0) {
+        pendingCenter = { lat: lat, lng: lng };   // 容器还没尺寸，暂存等待下次触发
+        return false;
+    }
+    try {
+        map = new TMap.Map(c, {
+            center: new TMap.LatLng(lat, lng),
+            zoom: 13,
+            viewMode: '2D'
+        });
+        // 二次选点：点击地图任意位置 -> 回传 C++
+        map.on('click', function (evt) {
+            var p = evt.latLng;
+            // 标记绘制失败不能影响坐标回传（坐标回传必须始终执行）
+            try { moveMe(p); } catch (e) { }
+            if (bridge) bridge.pick(p.getLat(), p.getLng());
+        });
+        // 补画此前暂存的站点标记
+        if (pendingStations) drawStations(pendingStations);
+    } catch (e) {
+        showFallback();
+        return false;
+    }
+    return true;
+}
+
+// 移动/创建"我的位置"标记：红色圆点
+function moveMe(p) {
+    if (meMarker) {
+        meMarker.updateGeometries([{ id: 'me', position: p }]);
+        return;
+    }
+    meMarker = new TMap.MultiMarker({
+        map: map,
+        styles: {
+            me: new TMap.MarkerStyle({
+                width: 18, height: 18, anchor: { x: 9, y: 9 },
+                src: pinSvg('#e53935', 18)
+            })
+        },
+        geometries: [{ id: 'me', styleId: 'me', position: p }]
+    });
+}
+
+// C++ 调用：地图以 (lat,lng) 为中心，并把"我的位置"红点画在该坐标上
+function centerOn(lat, lng) {
+    pendingCenter = { lat: lat, lng: lng };
+    if (!ensureMap(lat, lng)) return;
+    var p = new TMap.LatLng(lat, lng);
+    map.setCenter(p);
+    map.setZoom(13);
+    try { moveMe(p); } catch (e) { }
+}
+
+// C++ 调用：在地图上标记推荐站点 [{lat,lng,name}]：蓝色圆点
+function setStations(list) {
+    pendingStations = list;
+    if (!map) return;
+    drawStations(list);
+}
+
+function drawStations(list) {
+    if (stationLayer) { stationLayer.setMap(null); stationLayer = null; }
+    if (!list || list.length === 0) return;
+    var geos = list.map(function (s, i) {
+        return { id: 's' + i, styleId: 'station', position: new TMap.LatLng(s.lat, s.lng) };
+    });
+    stationLayer = new TMap.MultiMarker({
+        map: map,
+        styles: {
+            station: new TMap.MarkerStyle({
+                width: 16, height: 16, anchor: { x: 8, y: 8 },
+                src: pinSvg('#1e88e5', 16)
+            })
+        },
+        geometries: geos
+    });
+}
+</script>
+</body>
+</html>
