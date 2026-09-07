@@ -15,6 +15,7 @@ INCLUDEPATH += $$PWD/src $$PWD/src/common
 SOURCES += \
     src/main.cpp \
     src/common/DbManager.cpp \
+    src/common/TencentApi.cpp \
     src/common/TcpServer.cpp \
     src/common/ConnectionHandler.cpp \
     src/common/SessionManager.cpp \
@@ -31,6 +32,7 @@ SOURCES += \
 
 HEADERS += \
     src/common/ApiDefs.h \
+    src/common/TencentApi.h \
     src/common/DbManager.h \
     src/common/TcpServer.h \
     src/common/ConnectionHandler.h \

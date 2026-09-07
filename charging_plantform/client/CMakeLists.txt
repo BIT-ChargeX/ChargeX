@@ -4,6 +4,7 @@ project(ChargingClient LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 # Qt6 优先，找不到则回退 Qt5
 find_package(Qt6 COMPONENTS Widgets Network QUIET)
@@ -13,16 +14,16 @@ endif()
 
 if(Qt6_FOUND)
     set(QT_LIBRARY_TARGETS Qt6::Widgets Qt6::Network)
-    find_package(Qt6 COMPONENTS WebEngineWidgets QUIET)
-    if(Qt6WebEngineWidgets_FOUND)
-        list(APPEND QT_LIBRARY_TARGETS Qt6::WebEngineWidgets)
+    find_package(Qt6 COMPONENTS WebEngineWidgets WebChannel QUIET)
+    if(Qt6WebEngineWidgets_FOUND AND Qt6WebChannel_FOUND)
+        list(APPEND QT_LIBRARY_TARGETS Qt6::WebEngineWidgets Qt6::WebChannel)
         set(WEBENGINE_DEFINE USE_QT_WEBENGINE)
     endif()
 else()
     set(QT_LIBRARY_TARGETS Qt5::Widgets Qt5::Network)
-    find_package(Qt5 COMPONENTS WebEngineWidgets QUIET)
-    if(Qt5WebEngineWidgets_FOUND)
-        list(APPEND QT_LIBRARY_TARGETS Qt5::WebEngineWidgets)
+    find_package(Qt5 COMPONENTS WebEngineWidgets WebChannel QUIET)
+    if(Qt5WebEngineWidgets_FOUND AND Qt5WebChannel_FOUND)
+        list(APPEND QT_LIBRARY_TARGETS Qt5::WebEngineWidgets Qt5::WebChannel)
         set(WEBENGINE_DEFINE USE_QT_WEBENGINE)
     endif()
 endif()
@@ -30,6 +31,7 @@ endif()
 file(GLOB_RECURSE CLIENT_SOURCES
     src/*.cpp
     src/*.h
+    src/*.qrc
 )
 
 add_executable(ChargingClient ${CLIENT_SOURCES})

@@ -8,13 +8,16 @@ TEMPLATE = app
 
 DEFINES += QT_DEPRECATED_WARNINGS
 
-# 存在 QWebEngine 模块时启用腾讯地图导航页，否则自动降级
+# 存在 QWebEngine 模块时启用腾讯地图导航页与找桩页内嵌地图，否则自动降级
 qtHaveModule(webenginewidgets) {
-    QT += webenginewidgets
+    QT += webenginewidgets webchannel
     DEFINES += USE_QT_WEBENGINE
 }
 
 INCLUDEPATH += $$PWD/src
+
+# 内嵌地图 HTML 模板
+RESOURCES += src/resources/resources.qrc
 
 SOURCES += \
     src/main.cpp \
@@ -30,6 +33,7 @@ SOURCES += \
     src/station_nav/StationListWidget.cpp \
     src/station_nav/StationDetailWidget.cpp \
     src/station_nav/NavWidget.cpp \
+    src/station_nav/MapPickerWidget.cpp \
     src/charging/ChargingFlowWidget.cpp \
     src/charging/SettlementWidget.cpp \
     src/charging/OrderListWidget.cpp
@@ -48,6 +52,7 @@ HEADERS += \
     src/station_nav/StationListWidget.h \
     src/station_nav/StationDetailWidget.h \
     src/station_nav/NavWidget.h \
+    src/station_nav/MapPickerWidget.h \
     src/charging/ChargingFlowWidget.h \
     src/charging/SettlementWidget.h \
     src/charging/OrderListWidget.h

@@ -24,6 +24,12 @@ inline constexpr const char* CmdUserPointsRedeem   = "USER_POINTS_REDEEM";   // 
 inline constexpr const char* CmdStationNearby      = "STATION_NEARBY";
 inline constexpr const char* CmdStationDetail      = "STATION_DETAIL";
 inline constexpr const char* CmdPileDetailList     = "PILE_DETAIL_LIST";
+// 综合推荐（需求20 智能充电站推荐）：直线距离Top5 -> 腾讯驾车矩阵 -> 加权评分排序
+inline constexpr const char* CmdStationRecommend   = "STATION_RECOMMEND";
+
+// ---- 腾讯地图 WebService（服务端调用，需外网）----
+inline constexpr const char* kTencentMapKey = "4AFBZ-EOV63-NSS3K-OK2GL-WS7RQ-7UF7V";
+inline constexpr const char* kTencentMatrixUrl = "https://apis.map.qq.com/ws/distance/v1/matrix/";
 // 充电业务
 inline constexpr const char* CmdOrderCheckUnfinished = "ORDER_CHECK_UNFINISHED";
 inline constexpr const char* CmdOrderReserve          = "ORDER_RESERVE";
