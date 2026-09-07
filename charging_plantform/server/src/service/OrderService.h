@@ -10,5 +10,7 @@ Api::Reply reserve(const QJsonObject& data);
 Api::Reply create(const QJsonObject& data);
 Api::Reply settle(const QJsonObject& data);   // ORDER_SETTLE
 Api::Reply listOrders(const QJsonObject& data);   // ORDER_LIST：查询用户全部订单
+Api::Reply mgmtList(const QJsonObject& data);     // ORDER_MGMT_LIST：管理端分页订单查询
+Api::Reply cancelReserved(const QJsonObject& data); // ORDER_MGMT_CANCEL：取消预约占用订单
 
 }

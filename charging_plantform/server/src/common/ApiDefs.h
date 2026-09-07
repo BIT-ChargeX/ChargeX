@@ -55,6 +55,11 @@ inline constexpr const char* CmdStationMgmtAdd   = "STATION_MGMT_ADD";
 inline constexpr const char* CmdSalesSummary     = "SALES_SUMMARY";
 // 管理端查询充电桩终端实时运行日志（需 token）
 inline constexpr const char* CmdPileRuntimeLogList = "PILE_RUNTIME_LOG_LIST";
+// 管理端订单管理（需 token）：
+// ORDER_MGMT_LIST    分页全量订单（状态/关键字/日期过滤，只读）
+// ORDER_MGMT_CANCEL  取消“预约占用”订单（释放电桩，写 ops_log）
+inline constexpr const char* CmdOrderMgmtList    = "ORDER_MGMT_LIST";
+inline constexpr const char* CmdOrderMgmtCancel  = "ORDER_MGMT_CANCEL";
 
 // 充电桩终端(模拟设备)接入：设备长连接，设备→服务器；控制指令经 REPORT 的 pending 回带
 inline constexpr const char* CmdPileDevHello     = "PILE_DEV_HELLO";
