@@ -1,4 +1,5 @@
 #include "LoginWidget.h"
+#include "RegisterDialog.h"
 #include "common/NetClient.h"
 #include "common/AppSession.h"
 #include "common/ApiDefs.h"
@@ -24,7 +25,7 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     title->setFont(titleFont);
     layout->addWidget(title);
 
-    auto* subTitle = new QLabel(QStringLiteral("手机号密码登录（未注册将自动创建账号）"), this);
+    auto* subTitle = new QLabel(QStringLiteral("手机号密码登录"), this);
     subTitle->setAlignment(Qt::AlignCenter);
     layout->addWidget(subTitle);
 
@@ -47,7 +48,7 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     m_passwordEdit->setFixedHeight(38);
     layout->addWidget(m_passwordEdit);
 
-    m_loginBtn = new QPushButton(QStringLiteral("登录 / 注册"), this);
+    m_loginBtn = new QPushButton(QStringLiteral("登录"), this);
     m_loginBtn->setFixedHeight(42);
     layout->addWidget(m_loginBtn);
 
@@ -57,9 +58,16 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     m_hintLabel->setWordWrap(true);
     layout->addWidget(m_hintLabel);
 
+    m_registerBtn = new QPushButton(QStringLiteral("没有账号？立即注册"), this);
+    m_registerBtn->setFlat(true);
+    m_registerBtn->setCursor(Qt::PointingHandCursor);
+    m_registerBtn->setStyleSheet(QStringLiteral("color: #1e88e5; border: none;"));
+    layout->addWidget(m_registerBtn);
+
     layout->addStretch(1);
 
     connect(m_loginBtn, &QPushButton::clicked, this, &LoginWidget::onLoginClicked);
+    connect(m_registerBtn, &QPushButton::clicked, this, &LoginWidget::onRegisterClicked);
     connect(&NetClient::instance(), &NetClient::stateChanged,
             this, &LoginWidget::onNetStateChanged);
 
@@ -90,17 +98,17 @@ void LoginWidget::onNetStateChanged(int state) {
     }
 }
 
-// 【需求1 - 登录/注册】点击"登录/注册"按钮：
+// 【需求1 - 登录】点击"登录"按钮：
 // 1) 校验手机号格式（11 位、1 开头），不合法则弹提示并清空手机号，流程结束；
 // 2) 校验密码非空，为空则弹提示；
-// 3) 通过后携带手机号 + 密码请求服务端（由服务端判断登录还是自动注册）。
+// 3) 通过后携带手机号 + 密码请求服务端校验。
 void LoginWidget::onLoginClicked() {
     if (m_busy) return;
 
     const QString phone = m_phoneEdit->text().trimmed();
     const QString password = m_passwordEdit->text();
 
-    static const QRegularExpression re(QStringLiteral("^1[0-9]{10}$"));
+    static const QRegularExpression re(QStringLiteral("^1[3-9][0-9]{9}$"));
     if (!re.match(phone).hasMatch()) {
         m_phoneEdit->clear();
         QMessageBox::warning(this, QStringLiteral("提示"),
@@ -121,9 +129,15 @@ void LoginWidget::onLoginClicked() {
     requestLogin(phone, password);
 }
 
+// 打开注册弹窗（模态），注册成功后关闭弹窗，用户回到登录界面继续登录
+void LoginWidget::onRegisterClicked() {
+    RegisterDialog dlg(this);
+    dlg.exec();
+}
+
 // 发起登录请求并处理结果：
-// 1) 密码错误 -> 服务端返回错误，客户端清空密码并弹提示；
-// 2) 校验通过 -> 服务端已自动注册（若首次登录），客户端保存会话信息并进入主页。
+// 1) 手机号未注册/密码错误/冻结 -> 服务端返回错误，客户端清空密码并弹提示；
+// 2) 校验通过 -> 客户端保存会话信息并进入主页。
 void LoginWidget::requestLogin(const QString& phone, const QString& password) {
     setBusy(true);
     m_hintLabel->setText(QStringLiteral("登录中…"));

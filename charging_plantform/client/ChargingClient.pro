@@ -23,6 +23,7 @@ SOURCES += \
     src/common/AppSession.cpp \
     src/common/MapApi.cpp \
     src/account/LoginWidget.cpp \
+    src/account/RegisterDialog.cpp \
     src/account/ProfileWidget.cpp \
     src/account/RechargeWidget.cpp \
     src/station_nav/StationListWidget.cpp \
@@ -38,6 +39,7 @@ HEADERS += \
     src/common/AppSession.h \
     src/common/MapApi.h \
     src/account/LoginWidget.h \
+    src/account/RegisterDialog.h \
     src/account/ProfileWidget.h \
     src/account/RechargeWidget.h \
     src/station_nav/StationListWidget.h \
