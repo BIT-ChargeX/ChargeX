@@ -104,7 +104,7 @@ void DbManager::createSchema(QSqlDatabase db) {
         QStringLiteral(R"SQL(
             CREATE TABLE IF NOT EXISTS users (
                 user_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-                phone       VARCHAR(11) NOT NULL UNIQUE,
+                email       VARCHAR(128) NOT NULL UNIQUE,
                 nickname    VARCHAR(32) NOT NULL,
                 avatar_url  VARCHAR(255) DEFAULT '',
                 balance     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -211,6 +211,18 @@ void DbManager::createSchema(QSqlDatabase db) {
                 created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );)SQL"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_recharge_user ON recharge_record(user_id);"),
+        // 邮箱验证码表（忘记密码重置）
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS email_verify_code (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                email      VARCHAR(128) NOT NULL,
+                purpose    VARCHAR(16) NOT NULL DEFAULT 'reset',
+                code_hash  VARCHAR(64) NOT NULL,
+                expires_at DATETIME NOT NULL,
+                used       INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );)SQL"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_verify_email ON email_verify_code(email, purpose);"),
         // 播种默认系统配置（幂等）
         QStringLiteral("INSERT OR IGNORE INTO sys_config (cfg_key, cfg_value, remark) VALUES "
                        "('carbon_factor','0.785','每充1度电相对燃油车减少的碳排放 kg'),"
@@ -239,18 +251,18 @@ void DbManager::seedDemo(QSqlDatabase db) {
     q.exec(QStringLiteral("SELECT COUNT(*) FROM users;"));
     if (q.next() && q.value(0).toInt() == 0) {
         q.prepare(QStringLiteral(
-            "INSERT INTO users (phone, nickname, avatar_url, balance, password, status) "
+            "INSERT INTO users (email, nickname, avatar_url, balance, password, status) "
             "VALUES (?, ?, '', ?, ?, 1);"));
         const QList<QPair<QString, double>> demoUsers = {
-            {QStringLiteral("13800001111"), 66.00},
-            {QStringLiteral("13900002222"), 20.50},
-            {QStringLiteral("13700003333"), 0.00},
+            {QStringLiteral("demo1@qq.com"),  66.00},
+            {QStringLiteral("demo2@163.com"), 20.50},
+            {QStringLiteral("demo3@qq.com"),  0.00},
         };
         // 演示用户统一密码 123456，方便测试"已注册账号"登录
         const QString demoPass = DbManager::hashPassword(QStringLiteral("123456"));
         for (const auto& u : demoUsers) {
             q.addBindValue(u.first);
-            q.addBindValue(QStringLiteral("用户%1").arg(u.first.right(4)));
+            q.addBindValue(QStringLiteral("用户%1").arg(u.first.left(u.first.indexOf('@'))));
             q.addBindValue(u.second);
             q.addBindValue(demoPass);
             q.exec();

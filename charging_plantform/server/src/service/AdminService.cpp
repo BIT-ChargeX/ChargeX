@@ -44,15 +44,15 @@ Api::Reply AdminService::logout(const QJsonObject& data) {
 Api::Reply AdminService::userList(const QJsonObject& data) {
     const int page = qMax(1, data.value("page").toInt());
     const int pageSize = 20;
-    const QString keyword = data.value("phone_keyword").toString().trimmed();
+    const QString keyword = data.value("email_keyword").toString().trimmed();
 
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     QString sql = QStringLiteral(
-        "SELECT user_id, phone, nickname, balance, reg_time, status "
+        "SELECT user_id, email, nickname, balance, reg_time, status "
         "FROM users ");
     if (!keyword.isEmpty()) {
-        sql += QStringLiteral("WHERE phone LIKE ? ");
+        sql += QStringLiteral("WHERE email LIKE ? ");
     }
     sql += QStringLiteral("ORDER BY user_id LIMIT %1 OFFSET %2;")
                .arg(pageSize).arg((page - 1) * pageSize);
@@ -64,7 +64,7 @@ Api::Reply AdminService::userList(const QJsonObject& data) {
     while (q.next()) {
         QJsonObject u;
         u["user_id"] = q.value(0).toInt();
-        u["phone"] = q.value(1).toString();
+        u["email"] = q.value(1).toString();
         u["nickname"] = q.value(2).toString();
         u["balance"] = q.value(3).toDouble();
         u["reg_time"] = q.value(4).toString();

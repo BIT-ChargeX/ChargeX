@@ -20,6 +20,7 @@
 #include "common/ApiDefs.h"
 #include "common/InfluxClient.h"
 #include "common/MinioClient.h"
+#include "common/SmtpClient.h"
 
 int main(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
@@ -49,6 +50,17 @@ int main(int argc, char* argv[]) {
     MinioClient::configure(
         qEnvironmentVariable("MINIO_ENDPOINT", QStringLiteral("http://localhost:9010")),
         qEnvironmentVariable("MINIO_BUCKET", QStringLiteral("avatars")));
+
+    // 邮箱（QQ/163）SMTP 发信：忘记密码验证码。
+    // 未配置 SMTP_USER/SMTP_AUTH_CODE 时降级为演示模式（验证码打印到服务端日志）。
+    int smtpPort = qEnvironmentVariableIntValue("SMTP_PORT");
+    if (smtpPort <= 0 || smtpPort > 65535) smtpPort = 465;
+    SmtpClient::configure(
+        qEnvironmentVariable("SMTP_HOST", QString()),
+        static_cast<quint16>(smtpPort),
+        qEnvironmentVariable("SMTP_USER", QString()),
+        qEnvironmentVariable("SMTP_AUTH_CODE", QString()),
+        qEnvironmentVariable("SMTP_FROM", QString()));
 
     // 演示遥测：每 5 秒给每台桩生成一条采样并批量写入 InfluxDB
     QVector<int> pileIds;

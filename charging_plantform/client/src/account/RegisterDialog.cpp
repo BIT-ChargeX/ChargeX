@@ -27,11 +27,11 @@ RegisterDialog::RegisterDialog(QWidget* parent) : QDialog(parent) {
     title->setAlignment(Qt::AlignCenter);
     layout->addWidget(title);
 
-    m_phoneEdit = new QLineEdit(this);
-    m_phoneEdit->setPlaceholderText(QStringLiteral("请输入11位手机号"));
-    m_phoneEdit->setMaxLength(11);
-    m_phoneEdit->setFixedHeight(38);
-    layout->addWidget(m_phoneEdit);
+    m_emailEdit = new QLineEdit(this);
+    m_emailEdit->setPlaceholderText(QStringLiteral("请输入邮箱"));
+    m_emailEdit->setMaxLength(128);
+    m_emailEdit->setFixedHeight(38);
+    layout->addWidget(m_emailEdit);
 
     m_passwordEdit = new QLineEdit(this);
     m_passwordEdit->setPlaceholderText(QStringLiteral("设置新密码（至少8位，含大小写字母和数字）"));
@@ -68,28 +68,25 @@ RegisterDialog::RegisterDialog(QWidget* parent) : QDialog(parent) {
 void RegisterDialog::setBusy(bool busy) {
     m_busy = busy;
     m_registerBtn->setEnabled(!busy);
-    m_phoneEdit->setEnabled(!busy);
+    m_emailEdit->setEnabled(!busy);
     m_passwordEdit->setEnabled(!busy);
     m_confirmEdit->setEnabled(!busy);
 }
 
-// 注册流程：
-// 1) 校验手机号格式（11 位、1 开头、第二位 3-9）；
-// 2) 校验密码强度（至少8位，含大写字母、小写字母和数字）；
-// 3) 校验两次密码一致；
-// 4) 通过后请求服务端注册（服务端拦截已注册的手机号）。
+// 注册流程：校验邮箱格式 -> 密码强度 -> 两次密码一致 -> 请求服务端注册
 void RegisterDialog::onRegisterClicked() {
     if (m_busy) return;
 
-    const QString phone = m_phoneEdit->text().trimmed();
+    const QString email = m_emailEdit->text().trimmed();
     const QString password = m_passwordEdit->text();
     const QString confirm = m_confirmEdit->text();
 
-    static const QRegularExpression phoneRe(QStringLiteral("^1[3-9][0-9]{9}$"));
-    if (!phoneRe.match(phone).hasMatch()) {
-        m_phoneEdit->clear();
+    static const QRegularExpression emailRe(QStringLiteral(
+        "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"));
+    if (!emailRe.match(email).hasMatch()) {
+        m_emailEdit->clear();
         QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("手机号格式不正确，请输入正确的11位手机号"));
+                             QStringLiteral("邮箱格式不正确，请重新输入"));
         return;
     }
 
@@ -119,15 +116,15 @@ void RegisterDialog::onRegisterClicked() {
     }
 
     m_hintLabel->clear();
-    requestRegister(phone, password);
+    requestRegister(email, password);
 }
 
-void RegisterDialog::requestRegister(const QString& phone, const QString& password) {
+void RegisterDialog::requestRegister(const QString& email, const QString& password) {
     setBusy(true);
     m_hintLabel->setText(QStringLiteral("注册中…"));
 
     QJsonObject data;
-    data["phone"] = phone;
+    data["email"] = email;
     data["password"] = password;
 
     NetClient::instance().sendRequest(Api::CmdUserRegister, data,
