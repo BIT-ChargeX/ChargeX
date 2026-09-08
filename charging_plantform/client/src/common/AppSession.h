@@ -11,7 +11,7 @@ public:
 
     bool isLoggedIn() const;
     int userId() const;
-    QString phone() const;
+    QString email() const;
     QString nickname() const;
     QString avatar() const;
     double balance() const;
@@ -22,7 +22,7 @@ public:
     QString address() const;
 
 public slots:
-    void setLogin(int userId, const QString& phone, const QString& nickname,
+    void setLogin(int userId, const QString& email, const QString& nickname,
                   const QString& avatar, double balance);
     void logout();
     void setNickname(const QString& nickname);
@@ -43,7 +43,7 @@ private:
 
     bool m_loggedIn = false;
     int m_userId = 0;
-    QString m_phone;
+    QString m_email;
     QString m_nickname;
     QString m_avatar;
     double m_balance = 0.0;

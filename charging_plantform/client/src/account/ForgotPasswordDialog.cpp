@@ -1,4 +1,4 @@
-#include "RegisterDialog.h"
+#include "ForgotPasswordDialog.h"
 #include "common/NetClient.h"
 #include "common/ApiDefs.h"
 
@@ -12,24 +12,24 @@
 #include <QMessageBox>
 #include <QFont>
 
-RegisterDialog::RegisterDialog(QWidget* parent) : QDialog(parent) {
-    setWindowTitle(QStringLiteral("注册新账号"));
+ForgotPasswordDialog::ForgotPasswordDialog(QWidget* parent) : QDialog(parent) {
+    setWindowTitle(QStringLiteral("忘记密码"));
     setModal(true);
     setFixedWidth(380);
 
     auto* layout = new QVBoxLayout(this);
     layout->setSpacing(12);
 
-    auto* title = new QLabel(QStringLiteral("注册新账号"), this);
+    auto* title = new QLabel(QStringLiteral("通过邮箱验证码重置密码"), this);
     QFont titleFont = title->font();
-    titleFont.setPointSize(16);
+    titleFont.setPointSize(15);
     titleFont.setBold(true);
     title->setFont(titleFont);
     title->setAlignment(Qt::AlignCenter);
     layout->addWidget(title);
 
     m_emailEdit = new QLineEdit(this);
-    m_emailEdit->setPlaceholderText(QStringLiteral("请输入邮箱"));
+    m_emailEdit->setPlaceholderText(QStringLiteral("请输入注册邮箱"));
     m_emailEdit->setMaxLength(128);
     m_emailEdit->setFixedHeight(38);
     layout->addWidget(m_emailEdit);
@@ -65,30 +65,30 @@ RegisterDialog::RegisterDialog(QWidget* parent) : QDialog(parent) {
     m_hintLabel->setWordWrap(true);
     layout->addWidget(m_hintLabel);
 
-    m_registerBtn = new QPushButton(QStringLiteral("注册"), this);
-    m_registerBtn->setFixedHeight(42);
-    layout->addWidget(m_registerBtn);
+    m_resetBtn = new QPushButton(QStringLiteral("重置密码"), this);
+    m_resetBtn->setFixedHeight(42);
+    layout->addWidget(m_resetBtn);
 
     auto* cancelBtn = new QPushButton(QStringLiteral("取消"), this);
     cancelBtn->setFixedHeight(36);
     layout->addWidget(cancelBtn);
 
-    connect(m_sendBtn, &QPushButton::clicked, this, &RegisterDialog::onSendCodeClicked);
-    connect(m_registerBtn, &QPushButton::clicked, this, &RegisterDialog::onRegisterClicked);
-    connect(cancelBtn, &QPushButton::clicked, this, &RegisterDialog::reject);
+    connect(m_sendBtn, &QPushButton::clicked, this, &ForgotPasswordDialog::onSendCodeClicked);
+    connect(m_resetBtn, &QPushButton::clicked, this, &ForgotPasswordDialog::onResetClicked);
+    connect(cancelBtn, &QPushButton::clicked, this, &ForgotPasswordDialog::reject);
 }
 
-void RegisterDialog::setBusy(bool busy) {
+void ForgotPasswordDialog::setBusy(bool busy) {
     m_busy = busy;
     m_sendBtn->setEnabled(!busy);
-    m_registerBtn->setEnabled(!busy);
+    m_resetBtn->setEnabled(!busy);
     m_emailEdit->setEnabled(!busy);
     m_codeEdit->setEnabled(!busy);
     m_passwordEdit->setEnabled(!busy);
     m_confirmEdit->setEnabled(!busy);
 }
 
-void RegisterDialog::onSendCodeClicked() {
+void ForgotPasswordDialog::onSendCodeClicked() {
     if (m_busy) return;
 
     const QString email = m_emailEdit->text().trimmed();
@@ -110,7 +110,7 @@ void RegisterDialog::onSendCodeClicked() {
 
     QJsonObject data;
     data["email"] = email;
-    data["purpose"] = QStringLiteral("register");
+    data["purpose"] = QStringLiteral("reset");
     NetClient::instance().sendRequest(Api::CmdUserSendCode, data,
         [this](const QJsonObject& resp, int code, const QString& msg) {
             setBusy(false);
@@ -126,7 +126,7 @@ void RegisterDialog::onSendCodeClicked() {
         });
 }
 
-void RegisterDialog::onRegisterClicked() {
+void ForgotPasswordDialog::onResetClicked() {
     if (m_busy) return;
 
     const QString email = m_emailEdit->text().trimmed();
@@ -141,7 +141,7 @@ void RegisterDialog::onRegisterClicked() {
         return;
     }
     if (code.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("请输入邮箱验证码"));
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("请输入验证码"));
         return;
     }
     if (password.length() < 8) {
@@ -166,27 +166,22 @@ void RegisterDialog::onRegisterClicked() {
 
     setBusy(true);
     m_hintLabel->setStyleSheet(QStringLiteral("color: #d9534f;"));
-    m_hintLabel->setText(QStringLiteral("注册中…"));
+    m_hintLabel->setText(QStringLiteral("重置中…"));
 
-    requestRegister(email, password, code);
-}
-
-void RegisterDialog::requestRegister(const QString& email, const QString& password,
-                                     const QString& code) {
     QJsonObject data;
     data["email"] = email;
-    data["password"] = password;
     data["code"] = code;
+    data["new_password"] = password;
 
-    NetClient::instance().sendRequest(Api::CmdUserRegister, data,
+    NetClient::instance().sendRequest(Api::CmdUserResetPassword, data,
         [this](const QJsonObject&, int code, const QString& msg) {
             setBusy(false);
             if (code != 0) {
-                m_hintLabel->setText(QStringLiteral("注册失败：%1").arg(msg));
+                m_hintLabel->setText(QStringLiteral("重置失败：%1").arg(msg));
                 return;
             }
             QMessageBox::information(this, QStringLiteral("提示"),
-                                     QStringLiteral("注册成功，请登录"));
+                                     QStringLiteral("密码重置成功，请使用新密码登录"));
             accept();
         });
 }

@@ -22,6 +22,7 @@ SOURCES += \
     src/common/DeviceRegistry.cpp \
     src/common/InfluxClient.cpp \
     src/common/MinioClient.cpp \
+    src/common/SmtpClient.cpp \
     src/service/UserService.cpp \
     src/service/StationService.cpp \
     src/service/OrderService.cpp \
@@ -41,6 +42,7 @@ HEADERS += \
     src/common/HttpSync.h \
     src/common/InfluxClient.h \
     src/common/MinioClient.h \
+    src/common/SmtpClient.h \
     src/service/UserService.h \
     src/service/StationService.h \
     src/service/OrderService.h \

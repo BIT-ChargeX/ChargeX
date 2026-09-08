@@ -68,11 +68,11 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
     nickRow->addWidget(m_saveBtn);
     layout->addLayout(nickRow);
 
-    auto* phoneRow = new QHBoxLayout;
-    phoneRow->addWidget(new QLabel(QStringLiteral("手机号"), this));
-    m_phoneLabel = new QLabel(this);
-    phoneRow->addWidget(m_phoneLabel, 1);
-    layout->addLayout(phoneRow);
+    auto* emailRow = new QHBoxLayout;
+    emailRow->addWidget(new QLabel(QStringLiteral("邮箱"), this));
+    m_emailLabel = new QLabel(this);
+    emailRow->addWidget(m_emailLabel, 1);
+    layout->addLayout(emailRow);
 
     auto* balanceRow = new QHBoxLayout;
     balanceRow->addWidget(new QLabel(QStringLiteral("钱包余额"), this));
@@ -163,7 +163,7 @@ void ProfileWidget::applySession() {
             setAvatarPixmap(defaultAvatarPixmap());
         }
     }
-    m_phoneLabel->setText(s.phone());
+    m_emailLabel->setText(s.email());
     m_nicknameEdit->setText(s.nickname());
     m_balanceLabel->setText(QStringLiteral("¥%1").arg(s.balance(), 0, 'f', 2));
     m_pendingAvatarPath.clear();
@@ -189,7 +189,7 @@ void ProfileWidget::onLoginChanged() {
 
 void ProfileWidget::onLoggedOut() {
     setAvatarPixmap(defaultAvatarPixmap());
-    m_phoneLabel->clear();
+    m_emailLabel->clear();
     m_nicknameEdit->clear();
     m_balanceLabel->setText(QStringLiteral("¥0.00"));
     m_hintLabel->clear();

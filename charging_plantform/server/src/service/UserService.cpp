@@ -1,6 +1,7 @@
 #include "UserService.h"
 #include "DbManager.h"
 #include "MinioClient.h"
+#include "SmtpClient.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -10,13 +11,15 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QDebug>
+#include <QRandomGenerator>
 #include <cmath>
 
 namespace {
 
-bool validPhone(const QString& p) {
-    static const QRegularExpression re(QStringLiteral("^1[3-9][0-9]{9}$"));
-    return re.match(p).hasMatch();
+bool validEmail(const QString& e) {
+    static const QRegularExpression re(QStringLiteral(
+        "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"));
+    return re.match(e).hasMatch();
 }
 
 // 密码至少8位，且同时包含大写字母、小写字母和数字
@@ -106,16 +109,39 @@ const RedeemItem* findRedeemItem(const QString& id) {
     return nullptr;
 }
 
+// 校验邮箱验证码：返回最新一条未使用、未过期、purpose/哈希匹配的记录 id，失败返回 0
+int verifyCode(QSqlDatabase& db, const QString& email, const QString& purpose,
+               const QString& code) {
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT id, code_hash FROM email_verify_code "
+        "WHERE email = ? AND purpose = ? AND used = 0 AND expires_at > datetime('now') "
+        "ORDER BY id DESC LIMIT 1;"));
+    q.addBindValue(email);
+    q.addBindValue(purpose);
+    if (!q.exec() || !q.next()) return 0;
+    if (q.value(1).toString() != DbManager::hashPassword(code)) return 0;
+    return q.value(0).toInt();
+}
+
+// 标记验证码已使用
+void markCodeUsed(QSqlDatabase& db, int verifyId) {
+    QSqlQuery m(db);
+    m.prepare(QStringLiteral("UPDATE email_verify_code SET used = 1 WHERE id = ?;"));
+    m.addBindValue(verifyId);
+    m.exec();
+}
+
 } // namespace
 
-// 【需求1 - 手机号+密码登录】处理 USER_LOGIN：
-// 1) 校验手机号格式与密码非空；
-// 2) 按手机号查用户：不存在 -> 提示先注册；冻结 -> 拒绝；密码不匹配 -> 拒绝；
+// 【需求1 - 邮箱+密码登录】处理 USER_LOGIN：
+// 1) 校验邮箱格式与密码非空；
+// 2) 按邮箱查用户：不存在 -> 提示先注册；冻结 -> 拒绝；密码不匹配 -> 拒绝；
 // 3) 校验通过 -> 返回用户信息，客户端据此进入主页。
 Api::Reply UserService::login(const QJsonObject& data) {
-    const QString phone = data.value("phone").toString();
+    const QString email = data.value("email").toString().trimmed();
     const QString password = data.value("password").toString();
-    if (!validPhone(phone)) return Api::err(Api::InvalidParam, QStringLiteral("手机号格式不正确"));
+    if (!validEmail(email)) return Api::err(Api::InvalidParam, QStringLiteral("邮箱格式不正确"));
     if (password.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("请输入密码"));
 
     QSqlDatabase db = DbManager::threadDb();
@@ -123,10 +149,10 @@ Api::Reply UserService::login(const QJsonObject& data) {
 
     int userId = -1;
     QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT user_id, status, password FROM users WHERE phone = ?;"));
-    q.addBindValue(phone);
+    q.prepare(QStringLiteral("SELECT user_id, status, password FROM users WHERE email = ?;"));
+    q.addBindValue(email);
     if (!q.exec() || !q.next())
-        return Api::err(Api::NotFound, QStringLiteral("该手机号尚未注册，请先注册"));
+        return Api::err(Api::NotFound, QStringLiteral("该邮箱尚未注册，请先注册"));
 
     userId = q.value(0).toInt();
     if (q.value(1).toInt() == 0)   // status=0 表示冻结
@@ -142,7 +168,7 @@ Api::Reply UserService::login(const QJsonObject& data) {
 
     QJsonObject out;
     out["user_id"] = userId;
-    out["phone"] = phone;
+    out["email"] = email;
     out["nickname"] = sel.value(0).toString();
     out["avatar"] = sel.value(1).toString();
     out["balance"] = sel.value(2).toDouble();
@@ -150,39 +176,129 @@ Api::Reply UserService::login(const QJsonObject& data) {
 }
 
 // 【需求1 - 注册新账号】处理 USER_REGISTER：
-// 1) 校验手机号格式与密码强度；
-// 2) 手机号已存在 -> 拒绝；
-// 3) 通过 -> 创建账号（密码存哈希）。
+// 1) 校验邮箱格式、密码强度与邮箱验证码；
+// 2) 邮箱已存在 -> 拒绝；
+// 3) 通过 -> 创建账号（密码存哈希）并作废验证码。
 Api::Reply UserService::registerUser(const QJsonObject& data) {
-    const QString phone = data.value("phone").toString();
+    const QString email = data.value("email").toString().trimmed();
     const QString password = data.value("password").toString();
-    if (!validPhone(phone)) return Api::err(Api::InvalidParam, QStringLiteral("手机号格式不正确"));
+    const QString code = data.value("code").toString().trimmed();
+    if (!validEmail(email)) return Api::err(Api::InvalidParam, QStringLiteral("邮箱格式不正确"));
     if (!validPassword(password))
         return Api::err(Api::InvalidParam, QStringLiteral("密码至少8位，且需包含大写字母、小写字母和数字"));
+    if (code.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("请输入邮箱验证码"));
 
     QSqlDatabase db = DbManager::threadDb();
 
+    const int verifyId = verifyCode(db, email, QStringLiteral("register"), code);
+    if (verifyId == 0) return Api::err(Api::InvalidParam, QStringLiteral("验证码错误或已过期"));
+
     QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT user_id FROM users WHERE phone = ?;"));
-    q.addBindValue(phone);
+    q.prepare(QStringLiteral("SELECT user_id FROM users WHERE email = ?;"));
+    q.addBindValue(email);
     if (q.exec() && q.next())
-        return Api::err(Api::StateConflict, QStringLiteral("该手机号已注册，请直接登录"));
+        return Api::err(Api::StateConflict, QStringLiteral("该邮箱已注册，请直接登录"));
 
     const QString hash = DbManager::hashPassword(password);
     QSqlQuery ins(db);
     ins.prepare(QStringLiteral(
-        "INSERT INTO users (phone, nickname, avatar_url, balance, password, status) "
+        "INSERT INTO users (email, nickname, avatar_url, balance, password, status) "
         "VALUES (?,?,?,0,?,1);"));
-    ins.addBindValue(phone);
-    ins.addBindValue(QStringLiteral("用户%1").arg(phone.right(4)));
+    ins.addBindValue(email);
+    ins.addBindValue(QStringLiteral("用户%1").arg(email.left(email.indexOf('@'))));
     ins.addBindValue(QString());
     ins.addBindValue(hash);
     if (!ins.exec()) return Api::err(Api::ServerError, ins.lastError().text());
 
+    markCodeUsed(db, verifyId);
+
     QJsonObject out;
     out["user_id"] = ins.lastInsertId().toInt();
-    out["phone"] = phone;
+    out["email"] = email;
     return Api::okData(out);
+}
+
+// 【需求1 - 发送邮箱验证码】purpose: register(注册，邮箱须未注册) / reset(找回密码，邮箱须已注册)
+// 1) 校验邮箱格式与用途；2) 按用途校验邮箱是否已注册；3) 限流（同一邮箱+用途 1 分钟一次）；
+// 4) 生成 6 位随机码 -> 哈希存表（5 分钟有效）-> SMTP 发邮件；未配置 SMTP 时降级演示模式（打印日志）。
+Api::Reply UserService::sendCode(const QJsonObject& data) {
+    const QString email = data.value("email").toString().trimmed();
+    QString purpose = data.value("purpose").toString();
+    if (purpose.isEmpty()) purpose = QStringLiteral("reset");
+    if (!validEmail(email)) return Api::err(Api::InvalidParam, QStringLiteral("邮箱格式不正确"));
+    if (purpose != QStringLiteral("register") && purpose != QStringLiteral("reset"))
+        return Api::err(Api::InvalidParam, QStringLiteral("参数不合法"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    QSqlQuery chk(db);
+    chk.prepare(QStringLiteral("SELECT user_id FROM users WHERE email = ?;"));
+    chk.addBindValue(email);
+    const bool exists = chk.exec() && chk.next();
+    if (purpose == QStringLiteral("register") && exists)
+        return Api::err(Api::StateConflict, QStringLiteral("该邮箱已注册，请直接登录"));
+    if (purpose == QStringLiteral("reset") && !exists)
+        return Api::err(Api::NotFound, QStringLiteral("该邮箱尚未注册"));
+
+    QSqlQuery rate(db);
+    rate.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM email_verify_code "
+        "WHERE email = ? AND purpose = ? AND created_at > datetime('now','-1 minute');"));
+    rate.addBindValue(email);
+    rate.addBindValue(purpose);
+    if (rate.exec() && rate.next() && rate.value(0).toInt() > 0)
+        return Api::err(Api::StateConflict, QStringLiteral("发送过于频繁，请稍后再试"));
+
+    const QString code = QString::number(QRandomGenerator::global()->bounded(100000, 1000000));
+    const QString codeHash = DbManager::hashPassword(code);
+
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO email_verify_code (email, purpose, code_hash, expires_at) "
+        "VALUES (?, ?, ?, datetime('now','+5 minutes'));"));
+    ins.addBindValue(email);
+    ins.addBindValue(purpose);
+    ins.addBindValue(codeHash);
+    if (!ins.exec()) return Api::err(Api::ServerError, ins.lastError().text());
+
+    // 演示模式兜底：验证码始终打印到服务端日志
+    qInfo().noquote() << "[VerifyCode]" << purpose << email << "验证码:" << code;
+
+    const QString subject = QStringLiteral("【东软充电】邮箱验证码");
+    const QString body = QStringLiteral("你的验证码是 %1，5 分钟内有效。").arg(code);
+    if (SmtpClient::isConfigured() && !SmtpClient::sendPlainText(email, subject, body)) {
+        return Api::err(Api::ServerError, QStringLiteral("验证码邮件发送失败，请检查 SMTP 配置"));
+    }
+
+    QJsonObject out;
+    out["email"] = email;
+    out["demo"] = !SmtpClient::isConfigured();
+    return Api::okData(out);
+}
+
+// 【需求1 - 忘记密码】校验验证码并重置密码
+Api::Reply UserService::resetPassword(const QJsonObject& data) {
+    const QString email = data.value("email").toString().trimmed();
+    const QString code = data.value("code").toString().trimmed();
+    const QString newPassword = data.value("new_password").toString();
+    if (!validEmail(email)) return Api::err(Api::InvalidParam, QStringLiteral("邮箱格式不正确"));
+    if (code.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("请输入验证码"));
+    if (!validPassword(newPassword))
+        return Api::err(Api::InvalidParam, QStringLiteral("密码至少8位，且需包含大写字母、小写字母和数字"));
+
+    QSqlDatabase db = DbManager::threadDb();
+
+    const int verifyId = verifyCode(db, email, QStringLiteral("reset"), code);
+    if (verifyId == 0) return Api::err(Api::InvalidParam, QStringLiteral("验证码错误或已过期"));
+
+    QSqlQuery upd(db);
+    upd.prepare(QStringLiteral("UPDATE users SET password = ? WHERE email = ?;"));
+    upd.addBindValue(DbManager::hashPassword(newPassword));
+    upd.addBindValue(email);
+    if (!upd.exec() || upd.numRowsAffected() == 0)
+        return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
+
+    markCodeUsed(db, verifyId);
+    return Api::ok();
 }
 
 Api::Reply UserService::updateProfile(const QJsonObject& data) {
