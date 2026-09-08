@@ -22,6 +22,7 @@ HomeWindow::HomeWindow(QWidget* parent) : QWidget(parent) {
 
     m_tabs = new QTabWidget(this);
     m_tabs->setDocumentMode(true);
+    m_tabs->setObjectName(QStringLiteral("mainTabs"));
 
     m_stationList = new StationListWidget(this);
     m_stationDetail = new StationDetailWidget(this);

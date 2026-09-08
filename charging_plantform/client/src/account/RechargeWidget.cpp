@@ -53,10 +53,12 @@ RechargeWidget::RechargeWidget(QWidget* parent) : QDialog(parent) {
     layout->addWidget(m_hintLabel);
 
     m_confirmBtn = new QPushButton(QStringLiteral("确认充值（模拟支付）"), this);
+    m_confirmBtn->setObjectName(QStringLiteral("primaryBtn"));
     m_confirmBtn->setFixedHeight(40);
     layout->addWidget(m_confirmBtn);
 
     m_recordsBtn = new QPushButton(QStringLiteral("查看充值记录"), this);
+    m_recordsBtn->setObjectName(QStringLiteral("secondaryBtn"));
     m_recordsBtn->setFixedHeight(36);
     layout->addWidget(m_recordsBtn);
 

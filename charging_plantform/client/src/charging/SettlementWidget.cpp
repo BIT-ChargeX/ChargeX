@@ -34,12 +34,15 @@ SettlementWidget::SettlementWidget(QWidget* parent) : QDialog(parent) {
     layout->addWidget(m_noteLabel);
 
     m_settleBtn = new QPushButton(QStringLiteral("确认结算（余额支付）"), this);
+    m_settleBtn->setObjectName(QStringLiteral("primaryBtn"));
     m_settleBtn->setFixedHeight(40);
     layout->addWidget(m_settleBtn);
 
     auto* btnRow = new QHBoxLayout;
     m_rechargeBtn = new QPushButton(QStringLiteral("去充值"), this);
+    m_rechargeBtn->setObjectName(QStringLiteral("secondaryBtn"));
     m_okBtn = new QPushButton(QStringLiteral("关闭"), this);
+    m_okBtn->setObjectName(QStringLiteral("secondaryBtn"));
     btnRow->addWidget(m_rechargeBtn);
     btnRow->addWidget(m_okBtn);
     layout->addLayout(btnRow);

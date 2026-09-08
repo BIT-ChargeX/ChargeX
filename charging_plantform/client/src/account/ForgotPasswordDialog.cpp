@@ -41,6 +41,7 @@ ForgotPasswordDialog::ForgotPasswordDialog(QWidget* parent) : QDialog(parent) {
     m_codeEdit->setFixedHeight(38);
     codeRow->addWidget(m_codeEdit, 1);
     m_sendBtn = new QPushButton(QStringLiteral("发送验证码"), this);
+    m_sendBtn->setObjectName(QStringLiteral("secondaryBtn"));
     m_sendBtn->setFixedHeight(38);
     codeRow->addWidget(m_sendBtn);
     layout->addLayout(codeRow);
@@ -66,10 +67,12 @@ ForgotPasswordDialog::ForgotPasswordDialog(QWidget* parent) : QDialog(parent) {
     layout->addWidget(m_hintLabel);
 
     m_resetBtn = new QPushButton(QStringLiteral("重置密码"), this);
+    m_resetBtn->setObjectName(QStringLiteral("primaryBtn"));
     m_resetBtn->setFixedHeight(42);
     layout->addWidget(m_resetBtn);
 
     auto* cancelBtn = new QPushButton(QStringLiteral("取消"), this);
+    cancelBtn->setObjectName(QStringLiteral("secondaryBtn"));
     cancelBtn->setFixedHeight(36);
     layout->addWidget(cancelBtn);
 

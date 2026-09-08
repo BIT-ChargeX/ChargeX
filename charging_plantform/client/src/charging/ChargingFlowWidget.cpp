@@ -29,9 +29,8 @@ ChargingFlowWidget::ChargingFlowWidget(QWidget* parent) : QWidget(parent) {
     layout->addWidget(m_statusLabel);
 
     m_pileLabel = new QLabel(QStringLiteral("尚未选择电桩"), this);
+    m_pileLabel->setObjectName(QStringLiteral("infoCard"));
     m_pileLabel->setWordWrap(true);
-    m_pileLabel->setStyleSheet(QStringLiteral("background: #eef4ff; padding: 12px;"
-                                              "border: 1px solid #cfe0ff; border-radius: 6px;"));
     layout->addWidget(m_pileLabel);
 
     auto* slotRow = new QHBoxLayout;
@@ -45,23 +44,19 @@ ChargingFlowWidget::ChargingFlowWidget(QWidget* parent) : QWidget(parent) {
     layout->addLayout(slotRow);
 
     m_reserveBtn = new QPushButton(QStringLiteral("预约并开始充电"), this);
+    m_reserveBtn->setObjectName(QStringLiteral("primaryBtn"));
     m_reserveBtn->setEnabled(false);
     m_reserveBtn->setFixedHeight(46);
-    m_reserveBtn->setStyleSheet(QStringLiteral(
-        "QPushButton { background: #2e7d32; color: white; border-radius: 6px;"
-        " font-size: 15px; font-weight: bold; }"
-        "QPushButton:disabled { background: #bdbdbd; }"));
     layout->addWidget(m_reserveBtn);
 
     m_settleBtn = new QPushButton(this);
+    m_settleBtn->setObjectName(QStringLiteral("warningBtn"));
     m_settleBtn->setFixedHeight(40);
-    m_settleBtn->setStyleSheet(QStringLiteral(
-        "QPushButton { background: #fff3e0; color: #c62828; border: 1px solid #ffcc80;"
-        " border-radius: 6px; font-weight: bold; }"));
     m_settleBtn->hide();
     layout->addWidget(m_settleBtn);
 
     m_goPickPileBtn = new QPushButton(QStringLiteral("去「找桩」页选择电桩"), this);
+    m_goPickPileBtn->setObjectName(QStringLiteral("secondaryBtn"));
     layout->addWidget(m_goPickPileBtn);
 
     layout->addStretch(1);

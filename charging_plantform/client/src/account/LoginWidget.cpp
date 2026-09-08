@@ -8,6 +8,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
+#include <QFrame>
 #include <QVBoxLayout>
 #include <QRegularExpression>
 #include <QJsonObject>
@@ -15,61 +16,78 @@
 #include <QMessageBox>
 
 LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
+    setObjectName(QStringLiteral("loginPage"));
+
     auto* layout = new QVBoxLayout(this);
-    layout->setSpacing(14);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
 
-    auto* title = new QLabel(QStringLiteral("东软充电 · 用户端"), this);
-    title->setAlignment(Qt::AlignCenter);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    title->setFont(titleFont);
-    layout->addWidget(title);
+    // 顶部品牌横幅
+    auto* hero = new QLabel(QStringLiteral("⚡ ChargeX\n让绿色出行更简单"), this);
+    hero->setObjectName(QStringLiteral("loginHero"));
+    hero->setAlignment(Qt::AlignCenter);
+    hero->setFixedHeight(180);
+    layout->addWidget(hero);
 
-    auto* subTitle = new QLabel(QStringLiteral("邮箱密码登录"), this);
+    // 登录卡片
+    auto* card = new QFrame(this);
+    card->setObjectName(QStringLiteral("loginCard"));
+    auto* cardLayout = new QVBoxLayout(card);
+    cardLayout->setContentsMargins(28, 24, 28, 28);
+    cardLayout->setSpacing(12);
+
+    auto* body = new QVBoxLayout;
+    body->setContentsMargins(20, 20, 20, 24);
+    body->addWidget(card, 1);
+    layout->addLayout(body, 1);
+
+    auto* subTitle = new QLabel(QStringLiteral("欢迎回来，请登录"), card);
+    subTitle->setObjectName(QStringLiteral("loginSubtitle"));
     subTitle->setAlignment(Qt::AlignCenter);
-    layout->addWidget(subTitle);
+    cardLayout->addWidget(subTitle);
 
-    m_connLabel = new QLabel(QStringLiteral("正在连接服务器…"), this);
+    m_connLabel = new QLabel(QStringLiteral("正在连接服务器…"), card);
     m_connLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(m_connLabel);
+    cardLayout->addWidget(m_connLabel);
 
-    m_emailEdit = new QLineEdit(this);
+    m_emailEdit = new QLineEdit(card);
     m_emailEdit->setPlaceholderText(QStringLiteral("请输入邮箱"));
     m_emailEdit->setMaxLength(128);
-    m_emailEdit->setFixedHeight(38);
-    layout->addWidget(m_emailEdit);
+    m_emailEdit->setFixedHeight(40);
+    cardLayout->addWidget(m_emailEdit);
 
-    m_passwordEdit = new QLineEdit(this);
+    m_passwordEdit = new QLineEdit(card);
     m_passwordEdit->setPlaceholderText(QStringLiteral("请输入密码"));
     m_passwordEdit->setEchoMode(QLineEdit::Password);
     m_passwordEdit->setMaxLength(32);
-    m_passwordEdit->setFixedHeight(38);
-    layout->addWidget(m_passwordEdit);
+    m_passwordEdit->setFixedHeight(40);
+    cardLayout->addWidget(m_passwordEdit);
 
-    m_loginBtn = new QPushButton(QStringLiteral("登录"), this);
-    m_loginBtn->setFixedHeight(42);
-    layout->addWidget(m_loginBtn);
+    m_loginBtn = new QPushButton(QStringLiteral("登  录"), card);
+    m_loginBtn->setObjectName(QStringLiteral("primaryBtn"));
+    m_loginBtn->setCursor(Qt::PointingHandCursor);
+    m_loginBtn->setFixedHeight(44);
+    cardLayout->addWidget(m_loginBtn);
 
-    m_hintLabel = new QLabel(this);
+    m_hintLabel = new QLabel(card);
     m_hintLabel->setAlignment(Qt::AlignCenter);
-    m_hintLabel->setStyleSheet(QStringLiteral("color: #d9534f;"));
+    m_hintLabel->setStyleSheet(QStringLiteral("color: #e5484d;"));
     m_hintLabel->setWordWrap(true);
-    layout->addWidget(m_hintLabel);
+    cardLayout->addWidget(m_hintLabel);
 
-    m_registerBtn = new QPushButton(QStringLiteral("没有账号？立即注册"), this);
+    m_registerBtn = new QPushButton(QStringLiteral("没有账号？立即注册"), card);
+    m_registerBtn->setObjectName(QStringLiteral("linkBtn"));
     m_registerBtn->setFlat(true);
     m_registerBtn->setCursor(Qt::PointingHandCursor);
-    m_registerBtn->setStyleSheet(QStringLiteral("color: #1e88e5; border: none;"));
-    layout->addWidget(m_registerBtn);
+    cardLayout->addWidget(m_registerBtn);
 
-    m_forgotBtn = new QPushButton(QStringLiteral("忘记密码？"), this);
+    m_forgotBtn = new QPushButton(QStringLiteral("忘记密码？"), card);
+    m_forgotBtn->setObjectName(QStringLiteral("linkBtnGray"));
     m_forgotBtn->setFlat(true);
     m_forgotBtn->setCursor(Qt::PointingHandCursor);
-    m_forgotBtn->setStyleSheet(QStringLiteral("color: #888; border: none;"));
-    layout->addWidget(m_forgotBtn);
+    cardLayout->addWidget(m_forgotBtn);
 
-    layout->addStretch(1);
+    cardLayout->addStretch(1);
 
     connect(m_loginBtn, &QPushButton::clicked, this, &LoginWidget::onLoginClicked);
     connect(m_registerBtn, &QPushButton::clicked, this, &LoginWidget::onRegisterClicked);

@@ -33,6 +33,8 @@ RechargeRecordsWidget::RechargeRecordsWidget(QWidget* parent) : QDialog(parent) 
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->verticalHeader()->setVisible(false);
+    m_table->setShowGrid(false);
+    m_table->setAlternatingRowColors(true);
     layout->addWidget(m_table, 1);
 }
 

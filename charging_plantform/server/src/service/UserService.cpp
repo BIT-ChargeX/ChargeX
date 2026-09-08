@@ -56,8 +56,18 @@ QString ecoLevel(int points) {
     return QStringLiteral("环保新秀");
 }
 
-// 时间格式化：ISO -> yyyy-MM-dd HH:mm:ss
+// 时间格式化：数据库存的 created_at 是 UTC（SQLite CURRENT_TIMESTAMP），
+// 统一转换为北京时间（UTC+8）后再展示。
 QString fmtTime(const QString& iso) {
+    QDateTime dt = QDateTime::fromString(iso, Qt::ISODate);
+    if (!dt.isValid()) return iso;
+    dt.setTimeSpec(Qt::UTC);                      // 字段本义是 UTC
+    dt = dt.toOffsetFromUtc(8 * 3600);            // 转北京时间
+    return dt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+}
+
+// 本地时间格式化：用于本身就按服务器本地时间写入的字段，仅重排格式、不换算时区。
+QString fmtTimeLocal(const QString& iso) {
     const QDateTime dt = QDateTime::fromString(iso, Qt::ISODate);
     return dt.isValid() ? dt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : iso;
 }
@@ -546,7 +556,7 @@ Api::Reply UserService::pointsDetail(const QJsonObject& data) {
         QJsonObject it;
         it["type"]   = QStringLiteral("充电");
         it["source"] = QStringLiteral("订单 #%1").arg(q.value(0).toInt());
-        it["time"]   = fmtTime(q.value(1).toString());
+        it["time"]   = fmtTimeLocal(q.value(1).toString());   // end_time 为本地时间
         it["points"] = pts;
         items.append(it);
     }

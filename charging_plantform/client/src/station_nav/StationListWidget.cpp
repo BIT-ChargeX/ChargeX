@@ -85,7 +85,7 @@ StationListWidget::StationListWidget(QWidget* parent) : QWidget(parent) {
     m_suggestPopup = new QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint);
     m_suggestPopup->setAttribute(Qt::WA_ShowWithoutActivating);
     m_suggestPopup->setStyleSheet(QStringLiteral(
-        "QWidget#suggestPopup { background: #ffffff; border: 1px solid #90a4ae; }"));
+        "QWidget#suggestPopup { background: #ffffff; border: 1px solid #dde3ea; border-radius: 8px; }"));
     m_suggestPopup->setObjectName(QStringLiteral("suggestPopup"));
     auto* popupLayout = new QVBoxLayout(m_suggestPopup);
     popupLayout->setContentsMargins(2, 2, 2, 2);
@@ -93,9 +93,9 @@ StationListWidget::StationListWidget(QWidget* parent) : QWidget(parent) {
     m_suggestList->setFocusPolicy(Qt::NoFocus);
     m_suggestList->setStyleSheet(QStringLiteral(
         "QListWidget { border: none; background: #ffffff; }"
-        "QListWidget::item { padding: 6px 4px; color: #222; }"
-        "QListWidget::item:hover { background: #e3f2fd; }"
-        "QListWidget::item:selected { background: #e3f2fd; color: #1565c0; }"));
+        "QListWidget::item { padding: 6px 4px; color: #22303c; }"
+        "QListWidget::item:hover { background: #e6f9f0; }"
+        "QListWidget::item:selected { background: #d9f5e8; color: #0f3d2e; }"));
     popupLayout->addWidget(m_suggestList);
 
     connect(m_locateAddrBtn, &QPushButton::clicked, this, &StationListWidget::onLocateByAddress);
@@ -383,7 +383,7 @@ void StationListWidget::renderStations(const QJsonArray& stations, bool routeOk)
 void StationListWidget::addStationCard(const QJsonObject& station) {
     auto* item = new QListWidgetItem(m_listWidget);
     item->setData(Qt::UserRole, station);   // 整卡点击进详情时取回站点信息
-    item->setSizeHint(QSize(0, 100));
+    item->setSizeHint(QSize(0, 132));
 
     auto* frame = new QFrame(m_listWidget);
     frame->setFrameShape(QFrame::StyledPanel);
@@ -423,7 +423,7 @@ void StationListWidget::addStationCard(const QJsonObject& station) {
     auto* dist = new QPushButton(driveText, frame);
     dist->setCursor(Qt::PointingHandCursor);
     dist->setStyleSheet(QStringLiteral(
-        "QPushButton { color: #1976d2; font-weight: bold; border: none; background: transparent; }"
+        "QPushButton { color: #00b578; font-weight: bold; border: none; background: transparent; }"
         "QPushButton:hover { text-decoration: underline; }"));
     connect(dist, &QPushButton::clicked, this,
             [this, station]() { requestDetailForNav(station); });
@@ -443,6 +443,7 @@ void StationListWidget::addStationCard(const QJsonObject& station) {
     btnRow->addStretch(1);
     auto* detailBtn = new QPushButton(QStringLiteral("查看电桩"), frame);
     auto* navBtn = new QPushButton(QStringLiteral("导航"), frame);
+    navBtn->setObjectName(QStringLiteral("secondaryBtn"));
     btnRow->addWidget(detailBtn);
     btnRow->addWidget(navBtn);
     v->addLayout(btnRow);

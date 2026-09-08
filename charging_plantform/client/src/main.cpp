@@ -5,16 +5,21 @@
 #include <QStackedWidget>
 #include <QFont>
 #include <QByteArray>
+#include <QStringList>
 
 #include "common/NetClient.h"
 #include "common/AppSession.h"
 #include "common/ApiDefs.h"
 #include "account/LoginWidget.h"
 #include "HomeWindow.h"
+#include "theme/AppTheme.h"
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("ChargingClient"));
+
+    // 统一主题：全局 QSS，覆盖登录 / 弹窗 / 主页
+    app.setStyleSheet(AppTheme::styleSheet());
 
     // 服务器地址解析优先级：命令行参数 > 环境变量 > ApiDefs 默认值
     // 用法：ChargingClient [host] [port]  如 ChargingClient 192.168.1.10 9000
@@ -40,7 +45,17 @@ int main(int argc, char* argv[]) {
 
     NetClient::instance().connectToServer(host, port);
 
-    QFont font(QStringLiteral("PingFang SC"), 10);
+    // 优先使用对中文友好的字体，Windows 下为微软雅黑 UI
+    QFont font;
+    const QStringList fontCandidates = {
+        QStringLiteral("Microsoft YaHei UI"),
+        QStringLiteral("PingFang SC"),
+        QStringLiteral("Segoe UI"),
+    };
+    for (const QString& name : fontCandidates) {
+        font = QFont(name, 10);
+        if (font.exactMatch()) break;
+    }
     if (!font.exactMatch()) font = app.font();
     app.setFont(font);
 
@@ -48,6 +63,7 @@ int main(int argc, char* argv[]) {
     auto* homeWindow = new HomeWindow;
 
     auto* stack = new QStackedWidget;
+    stack->setObjectName(QStringLiteral("appRoot"));
     stack->addWidget(loginWidget);   // 0：登录
     stack->addWidget(homeWindow);    // 1：主页
 
@@ -69,7 +85,7 @@ int main(int argc, char* argv[]) {
 
     stack->setCurrentIndex(0);
     stack->resize(430, 760);
-    stack->setWindowTitle(QStringLiteral("东软充电桩 · 用户端"));
+    stack->setWindowTitle(QStringLiteral("ChargeX · 用户端"));
     stack->show();
 
     return app.exec();
