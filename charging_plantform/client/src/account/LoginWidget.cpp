@@ -98,7 +98,7 @@ void LoginWidget::onNetStateChanged(int state) {
         m_connLabel->setStyleSheet(QStringLiteral("color: #666;"));
         break;
     default:
-        m_connLabel->setText(QStringLiteral("服务器未连接，请先启动服务端(127.0.0.1:9000)"));
+        m_connLabel->setText(QStringLiteral("服务器未连接，请先启动服务端"));
         m_connLabel->setStyleSheet(QStringLiteral("color: #c62828;"));
         break;
     }
