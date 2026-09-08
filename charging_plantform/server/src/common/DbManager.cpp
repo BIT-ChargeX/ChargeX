@@ -313,8 +313,8 @@ void DbManager::seedDemo(QSqlDatabase db) {
                 QString type = fast ? QStringLiteral("快充") : QStringLiteral("慢充");
                 QString status = QString(Api::PileStatus::kIdle);
                 if (si == 0 && pi == 3)      status = QString(Api::PileStatus::kFault);
-                else if (si == 1 && pi == 1) status = QString(Api::PileStatus::kInUse);
-                else if (si == 3 && pi == 0) status = QString(Api::PileStatus::kInUse);
+                // 注：不预置“在用”桩——在用仅由“下单→START”真实会话产生，
+                //     保证功率曲线记录起点=充电启动时刻（seed 只保留闲置与少量故障）
                 else if (si == 4 && pi == 2) status = QString(Api::PileStatus::kFault);
 
                 q.prepare(QStringLiteral(

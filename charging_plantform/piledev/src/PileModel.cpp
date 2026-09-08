@@ -12,9 +12,9 @@ void PileModel::setStatic(int pileId, const QString& code, const QString& type,
     m_status = status;
     m_capacityKwh = power >= 50.0 ? 60.0 : 15.0;   // 快充/慢充容量简化假设
     m_soc = 20.0 + QRandomGenerator::global()->bounded(70);   // 20~90
-    // 绑定到的桩若初始即为“在用”，视为正在充电：直接输出额定功率，
-    // 保证服务端把该桩置在用（seed 或订单）后，其功率曲线始终有实时数据
-    m_curPowerKw = (status == QStringLiteral("在用")) ? power : 0.0;
+    // 功率输出只在收到 START（真实充电启动）后开启，曲线从启动时刻开始记录；
+    // 初始“在用”仅代表服务端状态，不代表本终端此刻在输出功率
+    m_curPowerKw = 0.0;
 }
 
 void PileModel::setFault() {

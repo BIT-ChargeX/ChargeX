@@ -185,6 +185,7 @@ void SimClient::doReport() {
 void SimClient::handlePending(const QJsonArray& pending) {
     if (pending.isEmpty()) return;
 
+    bool executed = false;
     for (const auto& v : pending) {
         const QJsonObject p = v.toObject();
         const int pileId = p.value("pile_id").toInt();
@@ -197,6 +198,7 @@ void SimClient::handlePending(const QJsonArray& pending) {
             pm.apply(cmd, p.value("data").toObject());
             log(QStringLiteral("[桩端] 电桩 %1(%2) 执行 %3：%4 → %5")
                     .arg(pileId).arg(pm.code()).arg(cmd).arg(before).arg(pm.status()));
+            executed = true;
 
             // 执行回执
             QJsonObject res;
@@ -209,4 +211,8 @@ void SimClient::handlePending(const QJsonArray& pending) {
             break;
         }
     }
+
+    // 指令执行后立即补发一帧上报（尤其 START），使服务端功率曲线首条采样≈充电启动时刻，
+    // 而不是等下一轮 5s 定时上报
+    if (executed) doReport();
 }
