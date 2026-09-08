@@ -26,6 +26,8 @@ SOURCES += \
     src/common/AppSession.cpp \
     src/common/MapApi.cpp \
     src/account/LoginWidget.cpp \
+    src/account/RegisterDialog.cpp \
+    src/account/ForgotPasswordDialog.cpp \
     src/account/ProfileWidget.cpp \
     src/account/RechargeWidget.cpp \
     src/account/RechargeRecordsWidget.cpp \
@@ -45,6 +47,8 @@ HEADERS += \
     src/common/AppSession.h \
     src/common/MapApi.h \
     src/account/LoginWidget.h \
+    src/account/RegisterDialog.h \
+    src/account/ForgotPasswordDialog.h \
     src/account/ProfileWidget.h \
     src/account/RechargeWidget.h \
     src/account/RechargeRecordsWidget.h \

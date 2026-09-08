@@ -11,7 +11,10 @@ inline constexpr const char* kDbFile = "charging_platform.db";
 
 // ---- 命令码 ----
 // 用户账户（对应客户端 account）
-inline constexpr const char* CmdUserLogin          = "USER_LOGIN";   // 手机号+密码登录（首次登录自动注册）
+inline constexpr const char* CmdUserLogin          = "USER_LOGIN";   // 邮箱+密码登录
+inline constexpr const char* CmdUserRegister       = "USER_REGISTER";  // 邮箱注册新账号
+inline constexpr const char* CmdUserSendCode       = "USER_SEND_CODE";    // 发送邮箱验证码（注册/忘记密码）
+inline constexpr const char* CmdUserResetPassword  = "USER_RESET_PASSWORD"; // 验证码重置密码
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
@@ -58,6 +61,11 @@ inline constexpr const char* CmdSalesSummary     = "SALES_SUMMARY";
 inline constexpr const char* CmdPileRuntimeLogList = "PILE_RUNTIME_LOG_LIST";
 // 管理端查询单桩功率-时间曲线（需 token）：入参 pile_id, minutes(5/30/60/1440, 默认60)
 inline constexpr const char* CmdPilePowerTrend   = "PILE_POWER_TREND";
+// 管理端订单管理（需 token）：
+// ORDER_MGMT_LIST    分页全量订单（状态/关键字/日期过滤，只读）
+// ORDER_MGMT_CANCEL  取消“预约占用”订单（释放电桩，写 ops_log）
+inline constexpr const char* CmdOrderMgmtList    = "ORDER_MGMT_LIST";
+inline constexpr const char* CmdOrderMgmtCancel  = "ORDER_MGMT_CANCEL";
 
 // 充电桩终端(模拟设备)接入：设备长连接，设备→服务器；控制指令经 REPORT 的 pending 回带
 inline constexpr const char* CmdPileDevHello     = "PILE_DEV_HELLO";

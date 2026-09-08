@@ -33,7 +33,9 @@ bool isAdminCommand(const QString& cmd) {
         || cmd == Api::CmdStationMgmtAdd
         || cmd == Api::CmdSalesSummary
         || cmd == Api::CmdPileRuntimeLogList
-        || cmd == Api::CmdPilePowerTrend;
+        || cmd == Api::CmdPilePowerTrend
+        || cmd == Api::CmdOrderMgmtList
+        || cmd == Api::CmdOrderMgmtCancel;
 }
 
 QByteArray frameOf(const QJsonObject& obj) {
@@ -108,6 +110,9 @@ void ConnectionHandler::processFrames() {
 
         if (authorized) {
             if (cmd == Api::CmdUserLogin)              reply = UserService::login(data);
+            else if (cmd == Api::CmdUserRegister)      reply = UserService::registerUser(data);
+            else if (cmd == Api::CmdUserSendCode)      reply = UserService::sendCode(data);
+            else if (cmd == Api::CmdUserResetPassword) reply = UserService::resetPassword(data);
             else if (cmd == Api::CmdUserUpdateProfile) reply = UserService::updateProfile(data);
             else if (cmd == Api::CmdUserRecharge)      reply = UserService::recharge(data);
             else if (cmd == Api::CmdUserRechargeRecords) reply = UserService::rechargeRecords(data);
@@ -140,6 +145,8 @@ void ConnectionHandler::processFrames() {
             else if (cmd == Api::CmdSalesSummary)      reply = SalesService::summary(data);
             else if (cmd == Api::CmdPileRuntimeLogList) reply = PileDeviceService::runtimeLogList(data);
             else if (cmd == Api::CmdPilePowerTrend)     reply = PileService::powerTrend(data);
+            else if (cmd == Api::CmdOrderMgmtList)      reply = OrderService::mgmtList(data);
+            else if (cmd == Api::CmdOrderMgmtCancel)    reply = OrderService::cancelReserved(data);
             else if (cmd == Api::CmdPileDevHello)      reply = PileDeviceService::hello(data);
             else if (cmd == Api::CmdPileDevReport)     reply = PileDeviceService::report(data);
             else if (cmd == Api::CmdPileDevResult)     reply = PileDeviceService::result(data);

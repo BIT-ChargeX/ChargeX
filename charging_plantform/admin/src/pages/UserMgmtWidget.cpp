@@ -21,9 +21,9 @@ UserMgmtWidget::UserMgmtWidget(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
 
     auto* bar = new QHBoxLayout;
-    bar->addWidget(new QLabel(QStringLiteral("手机号"), this));
+    bar->addWidget(new QLabel(QStringLiteral("邮箱"), this));
     m_searchEdit = new QLineEdit(this);
-    m_searchEdit->setPlaceholderText(QStringLiteral("输入手机号模糊搜索"));
+    m_searchEdit->setPlaceholderText(QStringLiteral("输入邮箱模糊搜索"));
     bar->addWidget(m_searchEdit, 1);
     m_searchBtn = new QPushButton(QStringLiteral("搜索"), this);
     m_searchBtn->setObjectName(QStringLiteral("btnPrimary"));
@@ -42,7 +42,7 @@ UserMgmtWidget::UserMgmtWidget(QWidget* parent) : QWidget(parent) {
     m_table = new QTableWidget(this);
     m_table->setColumnCount(6);
     m_table->setHorizontalHeaderLabels(
-        {QStringLiteral("用户ID"), QStringLiteral("手机号"), QStringLiteral("昵称"),
+        {QStringLiteral("用户ID"), QStringLiteral("邮箱"), QStringLiteral("昵称"),
          QStringLiteral("余额(元)"), QStringLiteral("注册时间"), QStringLiteral("状态")});
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -79,7 +79,7 @@ void UserMgmtWidget::refresh() {
 void UserMgmtWidget::loadUsers(const QString& keyword) {
     QJsonObject data;
     AdminSession::instance().attach(data);
-    if (!keyword.isEmpty()) data["phone_keyword"] = keyword;
+    if (!keyword.isEmpty()) data["email_keyword"] = keyword;
     data["page"] = 1;
 
     NetClient::instance().sendRequest(Api::CmdUserList, data,
@@ -96,7 +96,7 @@ void UserMgmtWidget::loadUsers(const QString& keyword) {
                 const int status = u.value("status").toInt();
                 const QStringList cols = {
                     QString::number(userId),
-                    u.value("phone").toString(),
+                    u.value("email").toString(),
                     u.value("nickname").toString(),
                     QString::number(u.value("balance").toDouble(), 'f', 2),
                     u.value("reg_time").toString(),
@@ -136,13 +136,13 @@ void UserMgmtWidget::onRowDoubleClicked(int row, int column) {
     const int userId = m_table->item(row, 0)->data(Qt::UserRole).toInt();
     const int status = m_table->item(row, 5)->data(Qt::UserRole).toInt();
     const bool doFreeze = status == 1;
-    const QString phone = m_table->item(row, 1)->text();
+    const QString email = m_table->item(row, 1)->text();
 
     const QString text = doFreeze
         ? QStringLiteral("确定冻结用户 %1（%2）吗？冻结后该用户无法登录充电。")
-              .arg(userId).arg(phone)
+              .arg(userId).arg(email)
         : QStringLiteral("确定解冻用户 %1（%2）吗？")
-              .arg(userId).arg(phone);
+              .arg(userId).arg(email);
     if (QMessageBox::question(this, doFreeze ? QStringLiteral("冻结确认")
                                              : QStringLiteral("解冻确认"),
                               text, QMessageBox::Yes | QMessageBox::No,
