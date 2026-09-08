@@ -54,6 +54,7 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
 
     auto* avatarRow = new QHBoxLayout;
     m_changeAvatarBtn = new QPushButton(QStringLiteral("更换头像"), this);
+    m_changeAvatarBtn->setObjectName(QStringLiteral("secondaryBtn"));
     avatarRow->addStretch(1);
     avatarRow->addWidget(m_changeAvatarBtn);
     avatarRow->addStretch(1);
@@ -80,6 +81,7 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
     m_balanceLabel->setStyleSheet(QStringLiteral("font-size: 16px; color: #e65100; font-weight: bold;"));
     balanceRow->addWidget(m_balanceLabel, 1);
     m_rechargeBtn = new QPushButton(QStringLiteral("充值"), this);
+    m_rechargeBtn->setObjectName(QStringLiteral("secondaryBtn"));
     balanceRow->addWidget(m_rechargeBtn);
     layout->addLayout(balanceRow);
 
@@ -106,14 +108,12 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
 
     // 碳积分：可点击进入明细与兑换
     m_pointsBtn = new QPushButton(QStringLiteral("碳积分：-- 分  ›"), this);
-    m_pointsBtn->setStyleSheet(QStringLiteral(
-        "text-align: left; padding: 10px; color: #2e7d32; font-weight: bold;"));
+    m_pointsBtn->setObjectName(QStringLiteral("rowBtn"));
     layout->addWidget(m_pointsBtn);
 
     // 我的充电订单：查看全部订单 + 结算未完成订单（从充电页迁入）
     m_ordersBtn = new QPushButton(QStringLiteral("我的充电订单  ›"), this);
-    m_ordersBtn->setStyleSheet(QStringLiteral(
-        "text-align: left; padding: 10px; color: #1565c0; font-weight: bold;"));
+    m_ordersBtn->setObjectName(QStringLiteral("rowBtn"));
     layout->addWidget(m_ordersBtn);
 
     m_hintLabel = new QLabel(this);
@@ -124,6 +124,7 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
     layout->addStretch(1);
 
     m_logoutBtn = new QPushButton(QStringLiteral("退出登录"), this);
+    m_logoutBtn->setObjectName(QStringLiteral("dangerBtn"));
     m_logoutBtn->setFixedHeight(40);
     layout->addWidget(m_logoutBtn);
 

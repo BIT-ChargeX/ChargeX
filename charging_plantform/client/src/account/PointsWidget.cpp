@@ -55,6 +55,8 @@ PointsWidget::PointsWidget(QWidget* parent) : QDialog(parent) {
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->verticalHeader()->setVisible(false);
+    m_table->setShowGrid(false);
+    m_table->setAlternatingRowColors(true);
     layout->addWidget(m_table, 1);
 
     auto* redeemRow = new QHBoxLayout;
@@ -65,6 +67,7 @@ PointsWidget::PointsWidget(QWidget* parent) : QDialog(parent) {
     }
     redeemRow->addWidget(m_itemCombo, 1);
     m_redeemBtn = new QPushButton(QStringLiteral("立即兑换"), this);
+    m_redeemBtn->setObjectName(QStringLiteral("primaryBtn"));
     redeemRow->addWidget(m_redeemBtn);
     layout->addLayout(redeemRow);
 

@@ -53,11 +53,15 @@ OrderListWidget::OrderListWidget(QWidget* parent) : QDialog(parent) {
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->verticalHeader()->setVisible(false);
+    m_table->setShowGrid(false);
+    m_table->setAlternatingRowColors(true);
     layout->addWidget(m_table, 1);
 
     auto* btnRow = new QHBoxLayout;
     auto* refreshBtn = new QPushButton(QStringLiteral("刷新"), this);
+    refreshBtn->setObjectName(QStringLiteral("secondaryBtn"));
     m_settleBtn = new QPushButton(QStringLiteral("结算选中订单"), this);
+    m_settleBtn->setObjectName(QStringLiteral("primaryBtn"));
     m_settleBtn->setEnabled(false);
     btnRow->addWidget(refreshBtn);
     btnRow->addWidget(m_settleBtn);

@@ -46,7 +46,9 @@ NavWidget::NavWidget(QWidget* parent) : QDialog(parent) {
 
     auto* btnRow = new QHBoxLayout;
     m_startBtn = new QPushButton(QStringLiteral("开始导航"), this);
+    m_startBtn->setObjectName(QStringLiteral("primaryBtn"));
     m_browserBtn = new QPushButton(QStringLiteral("在浏览器打开(备用)"), this);
+    m_browserBtn->setObjectName(QStringLiteral("secondaryBtn"));
     btnRow->addWidget(m_startBtn);
     btnRow->addWidget(m_browserBtn);
     layout->addLayout(btnRow);

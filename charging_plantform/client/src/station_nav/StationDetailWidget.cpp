@@ -47,12 +47,17 @@ StationDetailWidget::StationDetailWidget(QWidget* parent) : QDialog(parent) {
     m_pileTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_pileTable->setSelectionMode(QAbstractItemView::SingleSelection);
     m_pileTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_pileTable->setShowGrid(false);
+    m_pileTable->setAlternatingRowColors(true);
     layout->addWidget(m_pileTable, 1);
 
     auto* btnRow = new QHBoxLayout;
     m_navBtn = new QPushButton(QStringLiteral("一键导航"), this);
+    m_navBtn->setObjectName(QStringLiteral("secondaryBtn"));
     m_goChargingBtn = new QPushButton(QStringLiteral("去充电"), this);
+    m_goChargingBtn->setObjectName(QStringLiteral("primaryBtn"));
     auto* closeBtn = new QPushButton(QStringLiteral("关闭"), this);
+    closeBtn->setObjectName(QStringLiteral("secondaryBtn"));
     btnRow->addWidget(m_navBtn);
     btnRow->addWidget(m_goChargingBtn);
     btnRow->addWidget(closeBtn);
