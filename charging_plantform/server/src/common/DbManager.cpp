@@ -181,6 +181,15 @@ void DbManager::createSchema(QSqlDatabase db) {
                 detail        VARCHAR(128) DEFAULT ''
             );)SQL"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_prl_id ON pile_runtime_log(log_id DESC);"),
+        // 电桩功率-时间采样（终端每次 REPORT 落一行，供“功率曲线”时间轴展示）
+        QStringLiteral(R"SQL(
+            CREATE TABLE IF NOT EXISTS pile_power_log (
+                row_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                pile_id   INTEGER NOT NULL,
+                ts_ms     INTEGER NOT NULL,
+                power_kw  REAL
+            );)SQL"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_ppl_pile_ts ON pile_power_log(pile_id, ts_ms);"),
         // 系统配置表（减排系数等可调参数，需求：系数可在配置表中调整）
         QStringLiteral(R"SQL(
             CREATE TABLE IF NOT EXISTS sys_config (

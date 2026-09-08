@@ -34,6 +34,38 @@ void recalcStation(QSqlDatabase& db, int stationId) {
     q.exec();
 }
 
+// 实时聚合每站总桩/闲置桩数（口径：仅 status='闲置'；不再依赖缓存列）
+QHash<int, QPair<int, int>> livePileCounts(QSqlDatabase& db) {
+    QHash<int, QPair<int, int>> map;
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT station_id, COUNT(*), "
+        "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) "
+        "FROM piles GROUP BY station_id;"));
+    q.addBindValue(QStringLiteral("闲置"));
+    if (q.exec()) {
+        while (q.next()) {
+            map.insert(q.value(0).toInt(),
+                       {q.value(1).toInt(), q.value(2).toInt()});
+        }
+    }
+    return map;
+}
+
+// 单站实时聚合（detail 用）
+QPair<int, int> pileCountsOf(QSqlDatabase& db, int stationId) {
+    QPair<int, int> res{0, 0};
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT COUNT(*), "
+        "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) "
+        "FROM piles WHERE station_id = ?;"));
+    q.addBindValue(QStringLiteral("闲置"));
+    q.addBindValue(stationId);
+    if (q.exec() && q.next()) res = {q.value(0).toInt(), q.value(1).toInt()};
+    return res;
+}
+
 // 需求20 综合推荐权重：驾车距离 / 驾车时长 / 价格 / 空闲率
 constexpr double kWDist = 0.30;
 constexpr double kWTime = 0.25;
@@ -70,21 +102,24 @@ Api::Reply StationService::nearby(const QJsonObject& data) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.exec(QStringLiteral(
-        "SELECT station_id, name, address, lat, lng, price, pile_total, pile_free "
+        "SELECT station_id, name, address, lat, lng, price "
         "FROM stations;"));
     if (!q.isActive()) return Api::err(Api::ServerError, q.lastError().text());
 
+    const auto counts = livePileCounts(db);
     QJsonArray arr;
     while (q.next()) {
         const double sLat = q.value(3).toDouble();
         const double sLng = q.value(4).toDouble();
+        const int stationId = q.value(0).toInt();
+        const auto c = counts.value(stationId, {0, 0});
         QJsonObject s;
-        s["station_id"] = q.value(0).toInt();
+        s["station_id"] = stationId;
         s["name"] = q.value(1).toString();
         s["address"] = q.value(2).toString();
         s["price"] = q.value(5).toDouble();
-        s["pile_total"] = q.value(6).toInt();
-        s["pile_free"] = q.value(7).toInt();
+        s["pile_total"] = c.first;
+        s["pile_free"] = c.second;
         s["distance"] = distanceKm(lat, lng, sLat, sLng);
         arr.append(s);
     }
@@ -113,11 +148,12 @@ Api::Reply StationService::detail(const QJsonObject& data) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
-        "SELECT name, address, lat, lng, price, pile_total, pile_free "
+        "SELECT name, address, lat, lng, price "
         "FROM stations WHERE station_id = ?;"));
     q.addBindValue(stationId);
     if (!q.exec() || !q.next()) return Api::err(Api::NotFound, QStringLiteral("充电站不存在"));
 
+    const auto c = pileCountsOf(db, stationId);
     QJsonObject out;
     out["station_id"] = stationId;
     out["name"] = q.value(0).toString();
@@ -125,8 +161,8 @@ Api::Reply StationService::detail(const QJsonObject& data) {
     out["lat"] = q.value(2).toDouble();
     out["lng"] = q.value(3).toDouble();
     out["price"] = q.value(4).toDouble();
-    out["pile_total"] = q.value(5).toInt();
-    out["pile_free"] = q.value(6).toInt();
+    out["pile_total"] = c.first;
+    out["pile_free"] = c.second;
     return Api::okData(out);
 }
 
@@ -185,9 +221,11 @@ Api::Reply StationService::recommend(const QJsonObject& data) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.exec(QStringLiteral(
-        "SELECT station_id, name, address, lat, lng, price, pile_total, pile_free "
+        "SELECT station_id, name, address, lat, lng, price "
         "FROM stations;"));
     if (!q.isActive()) return Api::err(Api::ServerError, q.lastError().text());
+
+    const auto counts = livePileCounts(db);
 
     // 1) 直线距离初筛 Top5（控制腾讯矩阵调用量）
     struct Cand { QJsonObject obj; double straight; };
@@ -195,15 +233,17 @@ Api::Reply StationService::recommend(const QJsonObject& data) {
     while (q.next()) {
         const double sLat = q.value(3).toDouble();
         const double sLng = q.value(4).toDouble();
+        const int stationId = q.value(0).toInt();
+        const auto c = counts.value(stationId, {0, 0});
         QJsonObject s;
-        s["station_id"] = q.value(0).toInt();
+        s["station_id"] = stationId;
         s["name"] = q.value(1).toString();
         s["address"] = q.value(2).toString();
         s["lat"] = sLat;
         s["lng"] = sLng;
         s["price"] = q.value(5).toDouble();
-        s["pile_total"] = q.value(6).toInt();
-        s["pile_free"] = q.value(7).toInt();
+        s["pile_total"] = c.first;
+        s["pile_free"] = c.second;
         const double d = distanceKm(lat, lng, sLat, sLng);
         s["straight_km"] = d;
         cands.append({s, d});
@@ -304,21 +344,24 @@ Api::Reply StationService::mgmtList(const QJsonObject& /*data*/) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.exec(QStringLiteral(
-        "SELECT station_id, name, address, lat, lng, price, pile_total, pile_free "
+        "SELECT station_id, name, address, lat, lng, price "
         "FROM stations ORDER BY station_id;"));
     if (!q.isActive()) return Api::err(Api::ServerError, q.lastError().text());
 
+    const auto counts = livePileCounts(db);
     QJsonArray arr;
     while (q.next()) {
+        const int stationId = q.value(0).toInt();
+        const auto c = counts.value(stationId, {0, 0});
         QJsonObject s;
-        s["station_id"] = q.value(0).toInt();
+        s["station_id"] = stationId;
         s["name"] = q.value(1).toString();
         s["address"] = q.value(2).toString();
         s["lat"] = q.value(3).toDouble();
         s["lng"] = q.value(4).toDouble();
         s["price"] = q.value(5).toDouble();
-        s["pile_total"] = q.value(6).toInt();
-        s["pile_free"] = q.value(7).toInt();
+        s["pile_total"] = c.first;
+        s["pile_free"] = c.second;
         arr.append(s);
     }
 

@@ -18,8 +18,12 @@ inline constexpr const char* CmdUserFreeze        = "USER_FREEZE";
 inline constexpr const char* CmdPileMgmtList      = "PILE_MGMT_LIST";
 inline constexpr const char* CmdPileMgmtReboot    = "PILE_MGMT_REBOOT";
 inline constexpr const char* CmdPileMgmtSetStatus = "PILE_MGMT_SET_STATUS";
+// 发起报修：仅“故障”桩恢复为“闲置”
+inline constexpr const char* CmdPileMgmtRepair    = "PILE_MGMT_REPAIR";
 inline constexpr const char* CmdPileMonSummary    = "PILE_MON_SUMMARY";
 inline constexpr const char* CmdPileRuntimeLogList= "PILE_RUNTIME_LOG_LIST";
+// 单桩功率-时间曲线：入参 pile_id, minutes(5/30/60/1440, 默认60)
+inline constexpr const char* CmdPilePowerTrend   = "PILE_POWER_TREND";
 inline constexpr const char* CmdOpsLogList        = "OPS_LOG_LIST";
 inline constexpr const char* CmdStationMgmtList   = "STATION_MGMT_LIST";
 inline constexpr const char* CmdStationMgmtAdd    = "STATION_MGMT_ADD";

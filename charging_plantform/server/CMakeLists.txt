@@ -21,6 +21,9 @@ file(GLOB_RECURSE SERVER_SOURCES
     src/*.h
 )
 
+# 已停用 InfluxDB：源码文件保留在仓库，但不参与编译
+list(FILTER SERVER_SOURCES EXCLUDE REGEX ".*[\\\\/]InfluxClient\\.(cpp|h)$")
+
 add_executable(ChargingServer ${SERVER_SOURCES})
 
 target_include_directories(ChargingServer PRIVATE
