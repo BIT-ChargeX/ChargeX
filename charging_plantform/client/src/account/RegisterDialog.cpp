@@ -5,6 +5,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
+#include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QRegularExpression>
 #include <QJsonObject>
@@ -14,7 +15,7 @@
 RegisterDialog::RegisterDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(QStringLiteral("注册新账号"));
     setModal(true);
-    setFixedWidth(360);
+    setFixedWidth(380);
 
     auto* layout = new QVBoxLayout(this);
     layout->setSpacing(12);
@@ -32,6 +33,17 @@ RegisterDialog::RegisterDialog(QWidget* parent) : QDialog(parent) {
     m_emailEdit->setMaxLength(128);
     m_emailEdit->setFixedHeight(38);
     layout->addWidget(m_emailEdit);
+
+    auto* codeRow = new QHBoxLayout;
+    m_codeEdit = new QLineEdit(this);
+    m_codeEdit->setPlaceholderText(QStringLiteral("6位验证码"));
+    m_codeEdit->setMaxLength(6);
+    m_codeEdit->setFixedHeight(38);
+    codeRow->addWidget(m_codeEdit, 1);
+    m_sendBtn = new QPushButton(QStringLiteral("发送验证码"), this);
+    m_sendBtn->setFixedHeight(38);
+    codeRow->addWidget(m_sendBtn);
+    layout->addLayout(codeRow);
 
     m_passwordEdit = new QLineEdit(this);
     m_passwordEdit->setPlaceholderText(QStringLiteral("设置新密码（至少8位，含大小写字母和数字）"));
@@ -61,35 +73,77 @@ RegisterDialog::RegisterDialog(QWidget* parent) : QDialog(parent) {
     cancelBtn->setFixedHeight(36);
     layout->addWidget(cancelBtn);
 
+    connect(m_sendBtn, &QPushButton::clicked, this, &RegisterDialog::onSendCodeClicked);
     connect(m_registerBtn, &QPushButton::clicked, this, &RegisterDialog::onRegisterClicked);
     connect(cancelBtn, &QPushButton::clicked, this, &RegisterDialog::reject);
 }
 
 void RegisterDialog::setBusy(bool busy) {
     m_busy = busy;
+    m_sendBtn->setEnabled(!busy);
     m_registerBtn->setEnabled(!busy);
     m_emailEdit->setEnabled(!busy);
+    m_codeEdit->setEnabled(!busy);
     m_passwordEdit->setEnabled(!busy);
     m_confirmEdit->setEnabled(!busy);
 }
 
-// 注册流程：校验邮箱格式 -> 密码强度 -> 两次密码一致 -> 请求服务端注册
+void RegisterDialog::onSendCodeClicked() {
+    if (m_busy) return;
+
+    const QString email = m_emailEdit->text().trimmed();
+    static const QRegularExpression re(QStringLiteral(
+        "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"));
+    if (!re.match(email).hasMatch()) {
+        m_emailEdit->clear();
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("邮箱格式不正确"));
+        return;
+    }
+    if (!NetClient::instance().isConnected()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("服务器未连接"));
+        return;
+    }
+
+    setBusy(true);
+    m_hintLabel->setStyleSheet(QStringLiteral("color: #d9534f;"));
+    m_hintLabel->setText(QStringLiteral("发送中…"));
+
+    QJsonObject data;
+    data["email"] = email;
+    data["purpose"] = QStringLiteral("register");
+    NetClient::instance().sendRequest(Api::CmdUserSendCode, data,
+        [this](const QJsonObject& resp, int code, const QString& msg) {
+            setBusy(false);
+            if (code != 0) {
+                m_hintLabel->setText(QStringLiteral("发送失败：%1").arg(msg));
+                return;
+            }
+            const bool demo = resp.value("demo").toBool();
+            m_hintLabel->setStyleSheet(QStringLiteral("color: #2e7d32;"));
+            m_hintLabel->setText(demo
+                ? QStringLiteral("验证码已生成（演示模式，请查看服务端控制台日志）")
+                : QStringLiteral("验证码已发送到邮箱，请注意查收"));
+        });
+}
+
 void RegisterDialog::onRegisterClicked() {
     if (m_busy) return;
 
     const QString email = m_emailEdit->text().trimmed();
+    const QString code = m_codeEdit->text().trimmed();
     const QString password = m_passwordEdit->text();
     const QString confirm = m_confirmEdit->text();
 
-    static const QRegularExpression emailRe(QStringLiteral(
+    static const QRegularExpression re(QStringLiteral(
         "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"));
-    if (!emailRe.match(email).hasMatch()) {
-        m_emailEdit->clear();
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("邮箱格式不正确，请重新输入"));
+    if (!re.match(email).hasMatch()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("邮箱格式不正确"));
         return;
     }
-
+    if (code.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("请输入邮箱验证码"));
+        return;
+    }
     if (password.length() < 8) {
         QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("密码至少8位"));
         return;
@@ -109,30 +163,26 @@ void RegisterDialog::onRegisterClicked() {
         QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("两次输入的密码不一致"));
         return;
     }
-    if (!NetClient::instance().isConnected()) {
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("服务器未连接，注册失败"));
-        return;
-    }
 
-    m_hintLabel->clear();
-    requestRegister(email, password);
-}
-
-void RegisterDialog::requestRegister(const QString& email, const QString& password) {
     setBusy(true);
+    m_hintLabel->setStyleSheet(QStringLiteral("color: #d9534f;"));
     m_hintLabel->setText(QStringLiteral("注册中…"));
 
+    requestRegister(email, password, code);
+}
+
+void RegisterDialog::requestRegister(const QString& email, const QString& password,
+                                     const QString& code) {
     QJsonObject data;
     data["email"] = email;
     data["password"] = password;
+    data["code"] = code;
 
     NetClient::instance().sendRequest(Api::CmdUserRegister, data,
         [this](const QJsonObject&, int code, const QString& msg) {
             setBusy(false);
             if (code != 0) {
-                QMessageBox::warning(this, QStringLiteral("提示"),
-                                     QStringLiteral("注册失败：%1").arg(msg));
+                m_hintLabel->setText(QStringLiteral("注册失败：%1").arg(msg));
                 return;
             }
             QMessageBox::information(this, QStringLiteral("提示"),

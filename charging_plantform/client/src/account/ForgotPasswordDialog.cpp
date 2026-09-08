@@ -110,6 +110,7 @@ void ForgotPasswordDialog::onSendCodeClicked() {
 
     QJsonObject data;
     data["email"] = email;
+    data["purpose"] = QStringLiteral("reset");
     NetClient::instance().sendRequest(Api::CmdUserSendCode, data,
         [this](const QJsonObject& resp, int code, const QString& msg) {
             setBusy(false);

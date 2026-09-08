@@ -107,7 +107,7 @@ void ConnectionHandler::processFrames() {
         if (authorized) {
             if (cmd == Api::CmdUserLogin)              reply = UserService::login(data);
             else if (cmd == Api::CmdUserRegister)      reply = UserService::registerUser(data);
-            else if (cmd == Api::CmdUserSendCode)      reply = UserService::sendResetCode(data);
+            else if (cmd == Api::CmdUserSendCode)      reply = UserService::sendCode(data);
             else if (cmd == Api::CmdUserResetPassword) reply = UserService::resetPassword(data);
             else if (cmd == Api::CmdUserUpdateProfile) reply = UserService::updateProfile(data);
             else if (cmd == Api::CmdUserRecharge)      reply = UserService::recharge(data);

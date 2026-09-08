@@ -109,6 +109,29 @@ const RedeemItem* findRedeemItem(const QString& id) {
     return nullptr;
 }
 
+// 校验邮箱验证码：返回最新一条未使用、未过期、purpose/哈希匹配的记录 id，失败返回 0
+int verifyCode(QSqlDatabase& db, const QString& email, const QString& purpose,
+               const QString& code) {
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT id, code_hash FROM email_verify_code "
+        "WHERE email = ? AND purpose = ? AND used = 0 AND expires_at > datetime('now') "
+        "ORDER BY id DESC LIMIT 1;"));
+    q.addBindValue(email);
+    q.addBindValue(purpose);
+    if (!q.exec() || !q.next()) return 0;
+    if (q.value(1).toString() != DbManager::hashPassword(code)) return 0;
+    return q.value(0).toInt();
+}
+
+// 标记验证码已使用
+void markCodeUsed(QSqlDatabase& db, int verifyId) {
+    QSqlQuery m(db);
+    m.prepare(QStringLiteral("UPDATE email_verify_code SET used = 1 WHERE id = ?;"));
+    m.addBindValue(verifyId);
+    m.exec();
+}
+
 } // namespace
 
 // 【需求1 - 邮箱+密码登录】处理 USER_LOGIN：
@@ -153,17 +176,22 @@ Api::Reply UserService::login(const QJsonObject& data) {
 }
 
 // 【需求1 - 注册新账号】处理 USER_REGISTER：
-// 1) 校验邮箱格式与密码强度；
+// 1) 校验邮箱格式、密码强度与邮箱验证码；
 // 2) 邮箱已存在 -> 拒绝；
-// 3) 通过 -> 创建账号（密码存哈希）。
+// 3) 通过 -> 创建账号（密码存哈希）并作废验证码。
 Api::Reply UserService::registerUser(const QJsonObject& data) {
     const QString email = data.value("email").toString().trimmed();
     const QString password = data.value("password").toString();
+    const QString code = data.value("code").toString().trimmed();
     if (!validEmail(email)) return Api::err(Api::InvalidParam, QStringLiteral("邮箱格式不正确"));
     if (!validPassword(password))
         return Api::err(Api::InvalidParam, QStringLiteral("密码至少8位，且需包含大写字母、小写字母和数字"));
+    if (code.isEmpty()) return Api::err(Api::InvalidParam, QStringLiteral("请输入邮箱验证码"));
 
     QSqlDatabase db = DbManager::threadDb();
+
+    const int verifyId = verifyCode(db, email, QStringLiteral("register"), code);
+    if (verifyId == 0) return Api::err(Api::InvalidParam, QStringLiteral("验证码错误或已过期"));
 
     QSqlQuery q(db);
     q.prepare(QStringLiteral("SELECT user_id FROM users WHERE email = ?;"));
@@ -182,32 +210,41 @@ Api::Reply UserService::registerUser(const QJsonObject& data) {
     ins.addBindValue(hash);
     if (!ins.exec()) return Api::err(Api::ServerError, ins.lastError().text());
 
+    markCodeUsed(db, verifyId);
+
     QJsonObject out;
     out["user_id"] = ins.lastInsertId().toInt();
     out["email"] = email;
     return Api::okData(out);
 }
 
-// 【需求1 - 忘记密码】发送邮箱验证码：
-// 1) 校验邮箱格式且必须已注册；2) 限流（同一邮箱 1 分钟内只发一次）；
-// 3) 生成 6 位随机码 -> 哈希存表（5 分钟有效）-> SMTP 发邮件；
-//    未配置 SMTP 时降级为演示模式，验证码打印到服务端日志。
-Api::Reply UserService::sendResetCode(const QJsonObject& data) {
+// 【需求1 - 发送邮箱验证码】purpose: register(注册，邮箱须未注册) / reset(找回密码，邮箱须已注册)
+// 1) 校验邮箱格式与用途；2) 按用途校验邮箱是否已注册；3) 限流（同一邮箱+用途 1 分钟一次）；
+// 4) 生成 6 位随机码 -> 哈希存表（5 分钟有效）-> SMTP 发邮件；未配置 SMTP 时降级演示模式（打印日志）。
+Api::Reply UserService::sendCode(const QJsonObject& data) {
     const QString email = data.value("email").toString().trimmed();
+    QString purpose = data.value("purpose").toString();
+    if (purpose.isEmpty()) purpose = QStringLiteral("reset");
     if (!validEmail(email)) return Api::err(Api::InvalidParam, QStringLiteral("邮箱格式不正确"));
+    if (purpose != QStringLiteral("register") && purpose != QStringLiteral("reset"))
+        return Api::err(Api::InvalidParam, QStringLiteral("参数不合法"));
 
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery chk(db);
     chk.prepare(QStringLiteral("SELECT user_id FROM users WHERE email = ?;"));
     chk.addBindValue(email);
-    if (!chk.exec() || !chk.next())
+    const bool exists = chk.exec() && chk.next();
+    if (purpose == QStringLiteral("register") && exists)
+        return Api::err(Api::StateConflict, QStringLiteral("该邮箱已注册，请直接登录"));
+    if (purpose == QStringLiteral("reset") && !exists)
         return Api::err(Api::NotFound, QStringLiteral("该邮箱尚未注册"));
 
     QSqlQuery rate(db);
     rate.prepare(QStringLiteral(
         "SELECT COUNT(*) FROM email_verify_code "
-        "WHERE email = ? AND purpose = 'reset' AND created_at > datetime('now','-1 minute');"));
+        "WHERE email = ? AND purpose = ? AND created_at > datetime('now','-1 minute');"));
     rate.addBindValue(email);
+    rate.addBindValue(purpose);
     if (rate.exec() && rate.next() && rate.value(0).toInt() > 0)
         return Api::err(Api::StateConflict, QStringLiteral("发送过于频繁，请稍后再试"));
 
@@ -217,13 +254,14 @@ Api::Reply UserService::sendResetCode(const QJsonObject& data) {
     QSqlQuery ins(db);
     ins.prepare(QStringLiteral(
         "INSERT INTO email_verify_code (email, purpose, code_hash, expires_at) "
-        "VALUES (?, 'reset', ?, datetime('now','+5 minutes'));"));
+        "VALUES (?, ?, ?, datetime('now','+5 minutes'));"));
     ins.addBindValue(email);
+    ins.addBindValue(purpose);
     ins.addBindValue(codeHash);
     if (!ins.exec()) return Api::err(Api::ServerError, ins.lastError().text());
 
     // 演示模式兜底：验证码始终打印到服务端日志
-    qInfo().noquote() << "[ResetCode]" << email << "验证码:" << code;
+    qInfo().noquote() << "[VerifyCode]" << purpose << email << "验证码:" << code;
 
     const QString subject = QStringLiteral("【东软充电】邮箱验证码");
     const QString body = QStringLiteral("你的验证码是 %1，5 分钟内有效。").arg(code);
@@ -249,17 +287,8 @@ Api::Reply UserService::resetPassword(const QJsonObject& data) {
 
     QSqlDatabase db = DbManager::threadDb();
 
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral(
-        "SELECT id, code_hash FROM email_verify_code "
-        "WHERE email = ? AND purpose = 'reset' AND used = 0 AND expires_at > datetime('now') "
-        "ORDER BY id DESC LIMIT 1;"));
-    q.addBindValue(email);
-    if (!q.exec() || !q.next())
-        return Api::err(Api::InvalidParam, QStringLiteral("验证码错误或已过期"));
-    const int verifyId = q.value(0).toInt();
-    if (q.value(1).toString() != DbManager::hashPassword(code))
-        return Api::err(Api::InvalidParam, QStringLiteral("验证码错误"));
+    const int verifyId = verifyCode(db, email, QStringLiteral("reset"), code);
+    if (verifyId == 0) return Api::err(Api::InvalidParam, QStringLiteral("验证码错误或已过期"));
 
     QSqlQuery upd(db);
     upd.prepare(QStringLiteral("UPDATE users SET password = ? WHERE email = ?;"));
@@ -268,11 +297,7 @@ Api::Reply UserService::resetPassword(const QJsonObject& data) {
     if (!upd.exec() || upd.numRowsAffected() == 0)
         return Api::err(Api::NotFound, QStringLiteral("用户不存在"));
 
-    QSqlQuery mark(db);
-    mark.prepare(QStringLiteral("UPDATE email_verify_code SET used = 1 WHERE id = ?;"));
-    mark.addBindValue(verifyId);
-    mark.exec();
-
+    markCodeUsed(db, verifyId);
     return Api::ok();
 }
 
