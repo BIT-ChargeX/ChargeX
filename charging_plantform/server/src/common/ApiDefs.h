@@ -48,6 +48,8 @@ inline constexpr const char* CmdUserFreeze       = "USER_FREEZE";
 inline constexpr const char* CmdPileMgmtList     = "PILE_MGMT_LIST";
 inline constexpr const char* CmdPileMgmtReboot   = "PILE_MGMT_REBOOT";
 inline constexpr const char* CmdPileMgmtSetStatus= "PILE_MGMT_SET_STATUS";
+// 发起报修：仅“故障”桩恢复为“闲置”（写审计并同步终端）
+inline constexpr const char* CmdPileMgmtRepair   = "PILE_MGMT_REPAIR";
 inline constexpr const char* CmdPileMonSummary   = "PILE_MON_SUMMARY";
 inline constexpr const char* CmdOpsLogList       = "OPS_LOG_LIST";
 inline constexpr const char* CmdStationMgmtList  = "STATION_MGMT_LIST";
@@ -57,6 +59,8 @@ inline constexpr const char* CmdStationMgmtAdd   = "STATION_MGMT_ADD";
 inline constexpr const char* CmdSalesSummary     = "SALES_SUMMARY";
 // 管理端查询充电桩终端实时运行日志（需 token）
 inline constexpr const char* CmdPileRuntimeLogList = "PILE_RUNTIME_LOG_LIST";
+// 管理端查询单桩功率-时间曲线（需 token）：入参 pile_id, minutes(5/30/60/1440, 默认60)
+inline constexpr const char* CmdPilePowerTrend   = "PILE_POWER_TREND";
 // 管理端订单管理（需 token）：
 // ORDER_MGMT_LIST    分页全量订单（状态/关键字/日期过滤，只读）
 // ORDER_MGMT_CANCEL  取消“预约占用”订单（释放电桩，写 ops_log）

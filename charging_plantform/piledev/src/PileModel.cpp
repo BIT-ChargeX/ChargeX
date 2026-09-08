@@ -12,7 +12,9 @@ void PileModel::setStatic(int pileId, const QString& code, const QString& type,
     m_status = status;
     m_capacityKwh = power >= 50.0 ? 60.0 : 15.0;   // 快充/慢充容量简化假设
     m_soc = 20.0 + QRandomGenerator::global()->bounded(70);   // 20~90
-    m_curPowerKw = 0.0;
+    // 绑定到的桩若初始即为“在用”，视为正在充电：直接输出额定功率，
+    // 保证服务端把该桩置在用（seed 或订单）后，其功率曲线始终有实时数据
+    m_curPowerKw = (status == QStringLiteral("在用")) ? power : 0.0;
 }
 
 void PileModel::setFault() {
@@ -26,8 +28,11 @@ void PileModel::setIdle() {
 }
 
 void PileModel::tick(int seconds) {
-    // 充电中：累计时长并按功率提升 SOC
+    // 充电中：轻微功率波动(±3%)便于实时曲线可见，累计时长并按功率提升 SOC
     if (m_status == QStringLiteral("在用") && m_curPowerKw > 0.0) {
+        const double jitter = m_power
+            * (0.97 + QRandomGenerator::global()->generateDouble() * 0.06);
+        m_curPowerKw = jitter;
         const double dt = seconds / 3600.0;
         m_totalHours += dt;
         const double kwh = m_curPowerKw * dt;

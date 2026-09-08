@@ -2,9 +2,11 @@
 #include "Theme.h"
 
 #include <QPainter>
+#include <QPainterPath>
 #include <QPaintEvent>
 #include <QMouseEvent>
 #include <QFont>
+#include <QDateTime>
 #include <QtMath>
 
 namespace {
@@ -286,6 +288,104 @@ void BarChartWidget::paintEvent(QPaintEvent*) {
             p.drawText(QRect(static_cast<int>(left + slot * i), h - bottom + 4,
                              static_cast<int>(slot * labelStep), 16),
                        Qt::AlignCenter, m_labels.at(i));
+        }
+    }
+}
+
+// ================= LineChartWidget =================
+LineChartWidget::LineChartWidget(QWidget* parent) : QWidget(parent) {
+    setMinimumHeight(180);
+}
+
+void LineChartWidget::setSeries(const QVector<qint64>& tsMs,
+                                const QVector<double>& power) {
+    m_ts = tsMs;
+    m_power = power;
+    update();
+}
+
+void LineChartWidget::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    const int w = width();
+    const int h = height();
+    if (w <= 60 || h <= 50) return;
+
+    const int left = 46, right = 14, top = 16, bottom = 26;
+    const int plotW = w - left - right;
+    const int plotH = h - top - bottom;
+    if (plotW <= 10 || plotH <= 10) return;
+
+    if (m_ts.size() != m_power.size() || m_power.isEmpty()) {
+        p.setPen(Theme::textMuted());
+        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("暂无遥测数据"));
+        return;
+    }
+
+    // 数据范围
+    const qint64 t0 = m_ts.first();
+    const qint64 t1 = m_ts.last();
+    const double spanMs = qMax<qint64>(1, t1 - t0);
+    double maxP = 1.0;
+    for (double v : m_power) if (v > maxP) maxP = v;
+    const double yMax = maxP * 1.15;
+
+    const QRectF plot(left, top, plotW, plotH);
+    const auto mapX = [&](qint64 t) {
+        return left + plotW * (t - t0) / spanMs;
+    };
+    const auto mapY = [&](double v) {
+        return top + plotH - plotH * (v / yMax);
+    };
+
+    // 网格 + Y 轴刻度
+    p.setFont(font());
+    const int nYTicks = 4;
+    for (int t = 0; t <= nYTicks; ++t) {
+        const double v = yMax * t / nYTicks;
+        const qreal y = mapY(v);
+        p.setPen(Theme::border());
+        p.drawLine(QPointF(left, y), QPointF(left + plotW, y));
+        p.setPen(Theme::textMuted());
+        p.drawText(QRectF(0, y - 7, left - 8, 14),
+                   Qt::AlignRight | Qt::AlignVCenter, QString::number(v, 'f', 1));
+    }
+
+    // X 轴时间刻度（窗口跨度决定格式）
+    const bool needSec = spanMs < 3600LL * 1000;
+    const QString fmt = needSec ? QStringLiteral("HH:mm:ss") : QStringLiteral("HH:mm");
+    const int nXTicks = 5;
+    for (int t = 0; t < nXTicks; ++t) {
+        const qint64 ts = t0 + spanMs * t / (nXTicks - 1);
+        const qreal x = mapX(ts);
+        p.setPen(Theme::border());
+        p.drawLine(QPointF(x, top), QPointF(x, top + plotH));
+        p.setPen(Theme::textMuted());
+        const QString label = QDateTime::fromMSecsSinceEpoch(ts)
+                                  .toLocalTime()
+                                  .toString(fmt);
+        p.drawText(QRectF(x - 45, top + plotH + 6, 90, 16),
+                   Qt::AlignHCenter | Qt::AlignTop, label);
+    }
+
+    // 折线
+    QPainterPath path;
+    for (int i = 0; i < m_power.size(); ++i) {
+        const QPointF pt(mapX(m_ts[i]), mapY(m_power[i]));
+        if (i == 0) path.moveTo(pt);
+        else path.lineTo(pt);
+    }
+    p.setPen(QPen(Theme::accent(), 2.0));
+    p.setBrush(Qt::NoBrush);
+    p.drawPath(path);
+
+    // 数据点（量少才画）
+    if (m_power.size() <= 240) {
+        p.setBrush(Theme::accent());
+        p.setPen(Qt::NoPen);
+        for (int i = 0; i < m_power.size(); ++i) {
+            p.drawEllipse(QPointF(mapX(m_ts[i]), mapY(m_power[i])), 2.2, 2.2);
         }
     }
 }

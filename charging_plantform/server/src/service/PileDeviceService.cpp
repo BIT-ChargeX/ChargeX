@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QSet>
+#include <QDebug>
 
 namespace {
 
@@ -112,9 +113,13 @@ Api::Reply PileDeviceService::report(const QJsonObject& data) {
     sel.prepare(QStringLiteral("SELECT status, code FROM piles WHERE pile_id = ?;"));
 
     const QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     const QJsonArray reports = data.value("reports").toArray();
 
     QList<int> reportedIds;
+    QSqlQuery powerIns(db);
+    powerIns.prepare(QStringLiteral(
+        "INSERT INTO pile_power_log (pile_id, ts_ms, power_kw) VALUES (?,?,?);"));
     for (const auto& v : reports) {
         const QJsonObject r = v.toObject();
         const int pileId = r.value("pile_id").toInt();
@@ -150,8 +155,26 @@ Api::Reply PileDeviceService::report(const QJsonObject& data) {
         upd.addBindValue(pileId);
         upd.exec();
 
+        // 功率-时间采样：仅在桩处于“在用”（服务端为准）时落样本；
+        // 闲置/故障不上报采样 → 管理端功率曲线仅针对在用桩（可留空）
+        if (currentStatus == QString(Api::PileStatus::kInUse)) {
+            powerIns.addBindValue(pileId);
+            powerIns.addBindValue(nowMs);
+            powerIns.addBindValue(r.value("cur_power").toDouble());
+            if (!powerIns.exec()) {
+                qWarning() << "[PileDeviceService] 功率采样写入失败 pile=" << pileId
+                           << powerIns.lastError().text();
+            }
+        }
+
         reportedIds.append(pileId);
     }
+
+    // 低频清理：仅保留近 25 小时样本，避免表无限增长
+    QSqlQuery prune(db);
+    prune.prepare(QStringLiteral("DELETE FROM pile_power_log WHERE ts_ms < ?;"));
+    prune.addBindValue(nowMs - static_cast<qint64>(25) * 3600 * 1000LL);
+    prune.exec();
 
     QJsonObject out;
     out["pending"] = DeviceRegistry::instance().takePending(reportedIds);

@@ -3,17 +3,21 @@
 #include "common/AdminSession.h"
 #include "common/ApiDefs.h"
 #include "common/Theme.h"
+#include "common/SimpleCharts.h"
 
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QHeaderView>
 #include <QPushButton>
 #include <QLabel>
+#include <QComboBox>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QVector>
 #include <QBrush>
 #include <QMessageBox>
 
@@ -68,23 +72,53 @@ PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
     m_logTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_logTable->setAlternatingRowColors(true);
     m_logTable->verticalHeader()->setVisible(false);
-    lv->addWidget(m_logTable, 1);
+    m_logTable->setFixedHeight(120);
+    lv->addWidget(m_logTable);
+    lv->addSpacing(10);
+
+    // 功率-时间曲线卡（选中电桩后显示，5s 自动刷新）
+    auto* trendHead = new QHBoxLayout;
+    m_trendTitle = new QLabel(QStringLiteral("功率曲线（未选择电桩）"), logPanel);
+    m_trendTitle->setObjectName(QStringLiteral("sectionTitle"));
+    trendHead->addWidget(m_trendTitle);
+    trendHead->addStretch(1);
+    m_trendRange = new QComboBox(logPanel);
+    m_trendRange->addItem(QStringLiteral("近 5 分钟"), 5);
+    m_trendRange->addItem(QStringLiteral("近 30 分钟"), 30);
+    m_trendRange->addItem(QStringLiteral("近 1 小时"), 60);
+    m_trendRange->addItem(QStringLiteral("近 24 小时"), 1440);
+    m_trendRange->setCurrentIndex(2);   // 默认近 1 小时
+    trendHead->addWidget(m_trendRange);
+    lv->addLayout(trendHead);
+    m_line = new LineChartWidget(logPanel);
+    lv->addWidget(m_line, 1);
 
     splitter->addWidget(pilePanel);
     splitter->addWidget(logPanel);
-    splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 2);
+    splitter->setStretchFactor(0, 4);
+    splitter->setStretchFactor(1, 5);
     layout->addWidget(splitter, 1);
 
     connect(m_refreshBtn, &QPushButton::clicked, this, &PileWidget::refresh);
     connect(m_rebootBtn, &QPushButton::clicked, this, &PileWidget::onReboot);
     connect(m_pileTable, &QTableWidget::currentCellChanged,
-            this, [this](int, int, int, int) { updateRebootButton(); });
+            this, [this](int, int, int, int) {
+                updateRebootButton();
+                loadTrend();
+            });
     connect(m_pileTable, &QTableWidget::cellDoubleClicked,
             this, &PileWidget::onRowDoubleClicked);
+    connect(m_trendRange, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int) { loadTrend(); });
 
     // 初始禁用，随选中行状态机开启（闲置/在用才可重启）
     m_rebootBtn->setEnabled(false);
+
+    // 曲线自动刷新：3 秒推进一次时间轴（数据按终端上报节奏更新）
+    m_trendTimer = new QTimer(this);
+    m_trendTimer->setInterval(3000);
+    connect(m_trendTimer, &QTimer::timeout, this, &PileWidget::loadTrend);
+    m_trendTimer->start();
 
     refresh();
 }
@@ -92,6 +126,7 @@ PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
 void PileWidget::refresh() {
     loadPiles();
     loadOpsLog();
+    loadTrend();
 }
 
 void PileWidget::loadPiles() {
@@ -133,6 +168,19 @@ void PileWidget::loadPiles() {
                 stItem->setBackground(QBrush(Theme::statusBackground(status)));
             }
             m_countLabel->setText(QStringLiteral("共 %1 台电桩").arg(piles.size()));
+            // 默认选中策略：优先选中第一台“在用”桩（便于直接看实时功率曲线），否则选首行；
+            // 用户已手动选中时保持不变
+            if (m_pileTable->currentRow() < 0 && m_pileTable->rowCount() > 0) {
+                int sel = 0;
+                for (int i = 0; i < m_pileTable->rowCount(); ++i) {
+                    if (m_pileTable->item(i, 5)
+                        && m_pileTable->item(i, 5)->text() == QStringLiteral("在用")) {
+                        sel = i;
+                        break;
+                    }
+                }
+                m_pileTable->selectRow(sel);
+            }
         });
 }
 
@@ -213,6 +261,52 @@ bool PileWidget::canRebootRow(int row) {
     const QString s = m_pileTable->item(row, 5)->text();
     // 远程重启仅适用于 闲置/在用；故障等待报修、预约占用不可
     return s == QStringLiteral("闲置") || s == QStringLiteral("在用");
+}
+
+int PileWidget::currentPileId() {
+    const int row = m_pileTable->currentRow();
+    if (row < 0 || !m_pileTable->item(row, 0)) return 0;
+    return m_pileTable->item(row, 0)->data(Qt::UserRole).toInt();
+}
+
+void PileWidget::loadTrend() {
+    const int pileId = currentPileId();
+    if (pileId <= 0) {
+        m_line->setSeries({}, {});
+        m_trendTitle->setText(QStringLiteral("功率曲线（未选择电桩）"));
+        return;
+    }
+
+    QString code;
+    const int row = m_pileTable->currentRow();
+    if (row >= 0 && m_pileTable->item(row, 2))
+        code = m_pileTable->item(row, 2)->text();
+    m_trendTitle->setText(QStringLiteral("功率曲线（电桩 %1 · %2）")
+                              .arg(pileId).arg(code.isEmpty() ? QStringLiteral("-") : code));
+
+    QJsonObject data;
+    AdminSession::instance().attach(data);
+    data["pile_id"] = pileId;
+    data["minutes"] = m_trendRange->currentData().toInt();
+
+    NetClient::instance().sendRequest(Api::CmdPilePowerTrend, data,
+        [this](const QJsonObject& resp, int code, const QString& /*msg*/) {
+            if (code != 0) {
+                m_line->setSeries({}, {});
+                return;
+            }
+            QVector<qint64> ts;
+            QVector<double> power;
+            const QJsonArray points = resp.value("points").toArray();
+            ts.reserve(points.size());
+            power.reserve(points.size());
+            for (const auto& v : points) {
+                const QJsonObject pt = v.toObject();
+                ts.append(pt.value("ts").toVariant().toLongLong());
+                power.append(pt.value("power").toDouble());
+            }
+            m_line->setSeries(ts, power);
+        });
 }
 
 void PileWidget::doReboot(int pileId) {
