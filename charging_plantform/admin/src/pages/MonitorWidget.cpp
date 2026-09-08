@@ -127,7 +127,7 @@ MonitorWidget::MonitorWidget(QWidget* parent) : QWidget(parent) {
     m_chartArea->setObjectName(QStringLiteral("card"));
     auto* cv = new QVBoxLayout(m_chartArea);
     cv->setContentsMargins(16, 12, 16, 12);
-    auto* chartTitle = new QLabel(QStringLiteral("状态分布（点图例显隐分类）"), m_chartArea);
+    auto* chartTitle = new QLabel(QStringLiteral("状态分布（点击图例或扇形高亮）"), m_chartArea);
     chartTitle->setObjectName(QStringLiteral("sectionTitle"));
     cv->addWidget(chartTitle);
     m_pie = new PieChartWidget(m_chartArea);

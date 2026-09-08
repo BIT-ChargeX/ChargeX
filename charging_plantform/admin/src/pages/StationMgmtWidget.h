@@ -18,6 +18,7 @@ private slots:
     void onStationRowChanged(int row);
     void onSetFault();
     void onSetIdle();
+    void onRepair();
     void onPileTableDoubleClicked(int row, int column);
 
 private:
@@ -31,6 +32,7 @@ private:
     QPushButton* m_addBtn;
     QPushButton* m_faultBtn;
     QPushButton* m_idleBtn;
+    QPushButton* m_repairBtn;
     QPushButton* m_refreshBtn;
     QLabel* m_statusLabel;
     int m_currentStationId = -1;

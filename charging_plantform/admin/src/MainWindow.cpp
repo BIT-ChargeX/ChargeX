@@ -9,6 +9,7 @@
 #include "pages/UserMgmtWidget.h"
 #include "pages/StationMgmtWidget.h"
 #include "pages/PileWidget.h"
+#include "pages/OrderWidget.h"
 #include "pages/DeviceRuntimeWidget.h"
 
 #include <QStackedWidget>
@@ -22,8 +23,6 @@
 #include <QFrame>
 #include <QSizePolicy>
 #include <QJsonObject>
-#include <QDesktopServices>
-#include <QUrl>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(QStringLiteral("充电桩运营管理 - PC管理端"));
@@ -49,13 +48,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_statusLabel->setObjectName(QStringLiteral("statusPill"));
     bar->addWidget(m_statusLabel);
 
-    auto* influxBtn = new QPushButton(QStringLiteral("InfluxDB 控制台"), this);
-    influxBtn->setObjectName(QStringLiteral("btnGhost"));
     auto* refreshBtn = new QPushButton(QStringLiteral("刷新所有"), this);
     refreshBtn->setObjectName(QStringLiteral("btnGhost"));
     auto* logoutBtn = new QPushButton(QStringLiteral("退出登录"), this);
     logoutBtn->setObjectName(QStringLiteral("btnDanger"));
-    bar->addWidget(influxBtn);
     bar->addWidget(refreshBtn);
     bar->addWidget(logoutBtn);
     addToolBar(bar);
@@ -64,12 +60,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     statusBar()->showMessage(QStringLiteral("业务均通过服务器处理：ChargingServer 端口 %1").arg(Api::kPort));
 
-    connect(influxBtn, &QPushButton::clicked, this, []() {
-        // 打开 InfluxDB 2.x 自带 Web 控制台（Data Explorer 可查时序曲线）；
-        // 地址与 server 端 INFLUX_URL 保持一致，部署时可用同名环境变量覆盖。
-        const QString url = qEnvironmentVariable("INFLUX_URL", QStringLiteral("http://localhost:8086"));
-        QDesktopServices::openUrl(QUrl(url));
-    });
     connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::onRefreshAll);
     connect(logoutBtn, &QPushButton::clicked, this, [this]() {
         // 通知服务器作废会话
@@ -135,6 +125,7 @@ void MainWindow::buildPages() {
     addPage(new UserMgmtWidget(m_stack), QStringLiteral("用户管理"), 2);
     addPage(new StationMgmtWidget(m_stack), QStringLiteral("充电站管理"), 3);
     addPage(new PileWidget(m_stack), QStringLiteral("充电桩管理"), 4);
+    addPage(new OrderWidget(m_stack), QStringLiteral("订单管理"), 6);
     addPage(new DeviceRuntimeWidget(m_stack), QStringLiteral("充电桩实时日志"), 5);
 
     connect(m_rail, &NavRail::selectionChanged, this,
@@ -155,6 +146,7 @@ void MainWindow::onRefreshAll() {
         else if (auto* usr = qobject_cast<UserMgmtWidget*>(w)) usr->refresh();
         else if (auto* st = qobject_cast<StationMgmtWidget*>(w)) st->refresh();
         else if (auto* pile = qobject_cast<PileWidget*>(w)) pile->refresh();
+        else if (auto* ord = qobject_cast<OrderWidget*>(w)) ord->refresh();
         else if (auto* dev = qobject_cast<DeviceRuntimeWidget*>(w)) dev->refresh();
     }
     statusBar()->showMessage(QStringLiteral("已请求刷新全部页面"), 3000);

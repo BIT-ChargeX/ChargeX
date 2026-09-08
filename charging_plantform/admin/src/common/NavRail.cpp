@@ -81,6 +81,13 @@ QIcon navIcon(int kind, const QColor& color) {
         p.drawEllipse(QRectF(10.5, 13.7, 1.6, 1.6));
         break;
     }
+    case 6: {   // 订单（票据/收据）
+        p.drawRect(QRectF(4.5, 2.5, 11.0, 15.0));
+        p.drawLine(QPointF(4.5, 6.5), QPointF(15.5, 6.5));
+        p.drawLine(QPointF(4.5, 9.8), QPointF(15.5, 9.8));
+        L(QPointF(7.5, 13.2), QPointF(12.5, 13.2));
+        break;
+    }
     case 5:     // 日志列表
     default: {
         for (int i = 0; i < 3; ++i) {

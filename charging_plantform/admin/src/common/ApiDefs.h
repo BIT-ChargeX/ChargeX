@@ -7,7 +7,7 @@
 // 管理命令需携带 ADMIN_LOGIN 返回的 token。
 namespace Api {
 
-inline constexpr const char* kHost = "127.0.0.1";
+inline constexpr const char* kHost = "10.194.77.247";
 inline constexpr int kPort = 9000;
 
 // ---- 管理端命令 ----
@@ -18,14 +18,21 @@ inline constexpr const char* CmdUserFreeze        = "USER_FREEZE";
 inline constexpr const char* CmdPileMgmtList      = "PILE_MGMT_LIST";
 inline constexpr const char* CmdPileMgmtReboot    = "PILE_MGMT_REBOOT";
 inline constexpr const char* CmdPileMgmtSetStatus = "PILE_MGMT_SET_STATUS";
+// 发起报修：仅“故障”桩恢复为“闲置”
+inline constexpr const char* CmdPileMgmtRepair    = "PILE_MGMT_REPAIR";
 inline constexpr const char* CmdPileMonSummary    = "PILE_MON_SUMMARY";
 inline constexpr const char* CmdPileRuntimeLogList= "PILE_RUNTIME_LOG_LIST";
+// 单桩功率-时间曲线：入参 pile_id, minutes(5/30/60/1440, 默认60)
+inline constexpr const char* CmdPilePowerTrend   = "PILE_POWER_TREND";
 inline constexpr const char* CmdOpsLogList        = "OPS_LOG_LIST";
 inline constexpr const char* CmdStationMgmtList   = "STATION_MGMT_LIST";
 inline constexpr const char* CmdStationMgmtAdd    = "STATION_MGMT_ADD";
 // SALES_SUMMARY：入参 days(7/30) 或 start/end(yyyy-MM-dd,≤366天)；
 // 返回 today/month/total(+today_pct/month_pct 环比,-1 无基线)、daily[]、top_stations[]
 inline constexpr const char* CmdSalesSummary      = "SALES_SUMMARY";
+// 管理端订单管理（需 token）：ORDER_MGMT_LIST 分页查询 / ORDER_MGMT_CANCEL 取消预约占用
+inline constexpr const char* CmdOrderMgmtList     = "ORDER_MGMT_LIST";
+inline constexpr const char* CmdOrderMgmtCancel   = "ORDER_MGMT_CANCEL";
 
 // ---- 错误码（与服务端一致）----
 enum ErrCode {

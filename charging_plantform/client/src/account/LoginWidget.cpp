@@ -1,4 +1,6 @@
 #include "LoginWidget.h"
+#include "RegisterDialog.h"
+#include "ForgotPasswordDialog.h"
 #include "common/NetClient.h"
 #include "common/AppSession.h"
 #include "common/ApiDefs.h"
@@ -24,7 +26,7 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     title->setFont(titleFont);
     layout->addWidget(title);
 
-    auto* subTitle = new QLabel(QStringLiteral("手机号密码登录（未注册将自动创建账号）"), this);
+    auto* subTitle = new QLabel(QStringLiteral("邮箱密码登录"), this);
     subTitle->setAlignment(Qt::AlignCenter);
     layout->addWidget(subTitle);
 
@@ -32,14 +34,12 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     m_connLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_connLabel);
 
-    // 手机号输入框：仅数字、最多 11 位
-    m_phoneEdit = new QLineEdit(this);
-    m_phoneEdit->setPlaceholderText(QStringLiteral("请输入11位手机号"));
-    m_phoneEdit->setMaxLength(11);
-    m_phoneEdit->setFixedHeight(38);
-    layout->addWidget(m_phoneEdit);
+    m_emailEdit = new QLineEdit(this);
+    m_emailEdit->setPlaceholderText(QStringLiteral("请输入邮箱"));
+    m_emailEdit->setMaxLength(128);
+    m_emailEdit->setFixedHeight(38);
+    layout->addWidget(m_emailEdit);
 
-    // 密码输入框：以圆点遮蔽显示
     m_passwordEdit = new QLineEdit(this);
     m_passwordEdit->setPlaceholderText(QStringLiteral("请输入密码"));
     m_passwordEdit->setEchoMode(QLineEdit::Password);
@@ -47,7 +47,7 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     m_passwordEdit->setFixedHeight(38);
     layout->addWidget(m_passwordEdit);
 
-    m_loginBtn = new QPushButton(QStringLiteral("登录 / 注册"), this);
+    m_loginBtn = new QPushButton(QStringLiteral("登录"), this);
     m_loginBtn->setFixedHeight(42);
     layout->addWidget(m_loginBtn);
 
@@ -57,9 +57,23 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
     m_hintLabel->setWordWrap(true);
     layout->addWidget(m_hintLabel);
 
+    m_registerBtn = new QPushButton(QStringLiteral("没有账号？立即注册"), this);
+    m_registerBtn->setFlat(true);
+    m_registerBtn->setCursor(Qt::PointingHandCursor);
+    m_registerBtn->setStyleSheet(QStringLiteral("color: #1e88e5; border: none;"));
+    layout->addWidget(m_registerBtn);
+
+    m_forgotBtn = new QPushButton(QStringLiteral("忘记密码？"), this);
+    m_forgotBtn->setFlat(true);
+    m_forgotBtn->setCursor(Qt::PointingHandCursor);
+    m_forgotBtn->setStyleSheet(QStringLiteral("color: #888; border: none;"));
+    layout->addWidget(m_forgotBtn);
+
     layout->addStretch(1);
 
     connect(m_loginBtn, &QPushButton::clicked, this, &LoginWidget::onLoginClicked);
+    connect(m_registerBtn, &QPushButton::clicked, this, &LoginWidget::onRegisterClicked);
+    connect(m_forgotBtn, &QPushButton::clicked, this, &LoginWidget::onForgotPasswordClicked);
     connect(&NetClient::instance(), &NetClient::stateChanged,
             this, &LoginWidget::onNetStateChanged);
 
@@ -69,7 +83,7 @@ LoginWidget::LoginWidget(QWidget* parent) : QWidget(parent) {
 void LoginWidget::setBusy(bool busy) {
     m_busy = busy;
     m_loginBtn->setEnabled(!busy);
-    m_phoneEdit->setEnabled(!busy);
+    m_emailEdit->setEnabled(!busy);
     m_passwordEdit->setEnabled(!busy);
 }
 
@@ -84,27 +98,24 @@ void LoginWidget::onNetStateChanged(int state) {
         m_connLabel->setStyleSheet(QStringLiteral("color: #666;"));
         break;
     default:
-        m_connLabel->setText(QStringLiteral("服务器未连接，请先启动服务端(127.0.0.1:9000)"));
+        m_connLabel->setText(QStringLiteral("服务器未连接，请先启动服务端"));
         m_connLabel->setStyleSheet(QStringLiteral("color: #c62828;"));
         break;
     }
 }
 
-// 【需求1 - 登录/注册】点击"登录/注册"按钮：
-// 1) 校验手机号格式（11 位、1 开头），不合法则弹提示并清空手机号，流程结束；
-// 2) 校验密码非空，为空则弹提示；
-// 3) 通过后携带手机号 + 密码请求服务端（由服务端判断登录还是自动注册）。
 void LoginWidget::onLoginClicked() {
     if (m_busy) return;
 
-    const QString phone = m_phoneEdit->text().trimmed();
+    const QString email = m_emailEdit->text().trimmed();
     const QString password = m_passwordEdit->text();
 
-    static const QRegularExpression re(QStringLiteral("^1[0-9]{10}$"));
-    if (!re.match(phone).hasMatch()) {
-        m_phoneEdit->clear();
+    static const QRegularExpression re(QStringLiteral(
+        "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"));
+    if (!re.match(email).hasMatch()) {
+        m_emailEdit->clear();
         QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("手机号格式不正确，请重新输入"));
+                             QStringLiteral("邮箱格式不正确，请重新输入"));
         return;
     }
     if (password.isEmpty()) {
@@ -118,22 +129,29 @@ void LoginWidget::onLoginClicked() {
     }
 
     m_hintLabel->clear();
-    requestLogin(phone, password);
+    requestLogin(email, password);
 }
 
-// 发起登录请求并处理结果：
-// 1) 密码错误 -> 服务端返回错误，客户端清空密码并弹提示；
-// 2) 校验通过 -> 服务端已自动注册（若首次登录），客户端保存会话信息并进入主页。
-void LoginWidget::requestLogin(const QString& phone, const QString& password) {
+void LoginWidget::onRegisterClicked() {
+    RegisterDialog dlg(this);
+    dlg.exec();
+}
+
+void LoginWidget::onForgotPasswordClicked() {
+    ForgotPasswordDialog dlg(this);
+    dlg.exec();
+}
+
+void LoginWidget::requestLogin(const QString& email, const QString& password) {
     setBusy(true);
     m_hintLabel->setText(QStringLiteral("登录中…"));
 
     QJsonObject data;
-    data["phone"] = phone;
+    data["email"] = email;
     data["password"] = password;
 
     NetClient::instance().sendRequest(Api::CmdUserLogin, data,
-        [this, phone](const QJsonObject& resp, int code, const QString& msg) {
+        [this, email](const QJsonObject& resp, int code, const QString& msg) {
             setBusy(false);
             if (code != 0) {
                 m_passwordEdit->clear();
@@ -147,7 +165,7 @@ void LoginWidget::requestLogin(const QString& phone, const QString& password) {
             QString avatar = resp.value("avatar").toString();
             double balance = resp.value("balance").toDouble();
 
-            AppSession::instance().setLogin(userId, phone, nickname, avatar, balance);
+            AppSession::instance().setLogin(userId, email, nickname, avatar, balance);
             emit loginSucceeded();
         });
 }

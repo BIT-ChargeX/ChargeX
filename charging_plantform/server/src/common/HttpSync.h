@@ -10,7 +10,7 @@
 #include <QPair>
 
 // 同步 HTTP 请求工具：本地 QNetworkAccessManager + 嵌套 QEventLoop 阻塞等待完成。
-// 供 InfluxClient / MinioClient 在任意线程（含 TCP 连接工作线程）同步调用，
+// 供 MinioClient 等需要同步 HTTP 的模块在任意线程（含 TCP 连接工作线程）调用，
 // 保证与现有 Service 同步返回 Reply 的调用方式一致。
 struct HttpSyncResult {
     bool ok = false;

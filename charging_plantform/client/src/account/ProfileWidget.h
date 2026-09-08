@@ -41,7 +41,7 @@ private:
     void resetEcoFootprint();
 
     QLabel* m_avatarLabel;
-    QLabel* m_phoneLabel;
+    QLabel* m_emailLabel;
     QLineEdit* m_nicknameEdit;
     QPushButton* m_changeAvatarBtn;
     QPushButton* m_saveBtn;

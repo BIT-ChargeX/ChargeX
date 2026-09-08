@@ -11,7 +11,10 @@ inline constexpr const char* kDbFile = "charging_platform.db";
 
 // ---- 命令码 ----
 // 用户账户（对应客户端 account）
-inline constexpr const char* CmdUserLogin          = "USER_LOGIN";   // 手机号+密码登录（首次登录自动注册）
+inline constexpr const char* CmdUserLogin          = "USER_LOGIN";   // 邮箱+密码登录
+inline constexpr const char* CmdUserRegister       = "USER_REGISTER";  // 邮箱注册新账号
+inline constexpr const char* CmdUserSendCode       = "USER_SEND_CODE";    // 发送邮箱验证码（注册/忘记密码）
+inline constexpr const char* CmdUserResetPassword  = "USER_RESET_PASSWORD"; // 验证码重置密码
 inline constexpr const char* CmdUserUpdateProfile  = "USER_UPDATE_PROFILE";
 inline constexpr const char* CmdUserRecharge       = "USER_RECHARGE";
 inline constexpr const char* CmdUserGetBalance     = "USER_GET_BALANCE";
@@ -24,6 +27,12 @@ inline constexpr const char* CmdUserPointsRedeem   = "USER_POINTS_REDEEM";   // 
 inline constexpr const char* CmdStationNearby      = "STATION_NEARBY";
 inline constexpr const char* CmdStationDetail      = "STATION_DETAIL";
 inline constexpr const char* CmdPileDetailList     = "PILE_DETAIL_LIST";
+// 综合推荐（需求20 智能充电站推荐）：直线距离Top5 -> 腾讯驾车矩阵 -> 加权评分排序
+inline constexpr const char* CmdStationRecommend   = "STATION_RECOMMEND";
+
+// ---- 腾讯地图 WebService（服务端调用，需外网）----
+inline constexpr const char* kTencentMapKey = "4AFBZ-EOV63-NSS3K-OK2GL-WS7RQ-7UF7V";
+inline constexpr const char* kTencentMatrixUrl = "https://apis.map.qq.com/ws/distance/v1/matrix/";
 // 充电业务
 inline constexpr const char* CmdOrderCheckUnfinished = "ORDER_CHECK_UNFINISHED";
 inline constexpr const char* CmdOrderReserve          = "ORDER_RESERVE";
@@ -39,6 +48,8 @@ inline constexpr const char* CmdUserFreeze       = "USER_FREEZE";
 inline constexpr const char* CmdPileMgmtList     = "PILE_MGMT_LIST";
 inline constexpr const char* CmdPileMgmtReboot   = "PILE_MGMT_REBOOT";
 inline constexpr const char* CmdPileMgmtSetStatus= "PILE_MGMT_SET_STATUS";
+// 发起报修：仅“故障”桩恢复为“闲置”（写审计并同步终端）
+inline constexpr const char* CmdPileMgmtRepair   = "PILE_MGMT_REPAIR";
 inline constexpr const char* CmdPileMonSummary   = "PILE_MON_SUMMARY";
 inline constexpr const char* CmdOpsLogList       = "OPS_LOG_LIST";
 inline constexpr const char* CmdStationMgmtList  = "STATION_MGMT_LIST";
@@ -48,6 +59,13 @@ inline constexpr const char* CmdStationMgmtAdd   = "STATION_MGMT_ADD";
 inline constexpr const char* CmdSalesSummary     = "SALES_SUMMARY";
 // 管理端查询充电桩终端实时运行日志（需 token）
 inline constexpr const char* CmdPileRuntimeLogList = "PILE_RUNTIME_LOG_LIST";
+// 管理端查询单桩功率-时间曲线（需 token）：入参 pile_id, minutes(5/30/60/1440, 默认60)
+inline constexpr const char* CmdPilePowerTrend   = "PILE_POWER_TREND";
+// 管理端订单管理（需 token）：
+// ORDER_MGMT_LIST    分页全量订单（状态/关键字/日期过滤，只读）
+// ORDER_MGMT_CANCEL  取消“预约占用”订单（释放电桩，写 ops_log）
+inline constexpr const char* CmdOrderMgmtList    = "ORDER_MGMT_LIST";
+inline constexpr const char* CmdOrderMgmtCancel  = "ORDER_MGMT_CANCEL";
 
 // 充电桩终端(模拟设备)接入：设备长连接，设备→服务器；控制指令经 REPORT 的 pending 回带
 inline constexpr const char* CmdPileDevHello     = "PILE_DEV_HELLO";

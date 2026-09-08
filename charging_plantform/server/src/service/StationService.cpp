@@ -1,5 +1,6 @@
 #include "StationService.h"
 #include "DbManager.h"
+#include "TencentApi.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -10,6 +11,12 @@
 #include <cmath>
 #include <algorithm>
 #include <QVector>
+#include <QPair>
+#include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QDateTime>
+#include <QStringList>
 
 namespace {
 
@@ -26,6 +33,48 @@ void recalcStation(QSqlDatabase& db, int stationId) {
     q.addBindValue(stationId);
     q.exec();
 }
+
+// 实时聚合每站总桩/闲置桩数（口径：仅 status='闲置'；不再依赖缓存列）
+QHash<int, QPair<int, int>> livePileCounts(QSqlDatabase& db) {
+    QHash<int, QPair<int, int>> map;
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT station_id, COUNT(*), "
+        "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) "
+        "FROM piles GROUP BY station_id;"));
+    q.addBindValue(QStringLiteral("闲置"));
+    if (q.exec()) {
+        while (q.next()) {
+            map.insert(q.value(0).toInt(),
+                       {q.value(1).toInt(), q.value(2).toInt()});
+        }
+    }
+    return map;
+}
+
+// 单站实时聚合（detail 用）
+QPair<int, int> pileCountsOf(QSqlDatabase& db, int stationId) {
+    QPair<int, int> res{0, 0};
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT COUNT(*), "
+        "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) "
+        "FROM piles WHERE station_id = ?;"));
+    q.addBindValue(QStringLiteral("闲置"));
+    q.addBindValue(stationId);
+    if (q.exec() && q.next()) res = {q.value(0).toInt(), q.value(1).toInt()};
+    return res;
+}
+
+// 需求20 综合推荐权重：驾车距离 / 驾车时长 / 价格 / 空闲率
+constexpr double kWDist = 0.30;
+constexpr double kWTime = 0.25;
+constexpr double kWPrice = 0.20;
+constexpr double kWFree = 0.25;
+
+// 推荐结果缓存：同坐标 60s 内直接复用，避免反复调用腾讯矩阵（个人key有日配额）
+QMutex g_recoCacheMutex;
+QHash<QString, QPair<QDateTime, QJsonArray>> g_recoCache;
 
 constexpr double kEarthRadiusKm = 6371.0;
 constexpr double kPi = 3.14159265358979323846;
@@ -53,21 +102,24 @@ Api::Reply StationService::nearby(const QJsonObject& data) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.exec(QStringLiteral(
-        "SELECT station_id, name, address, lat, lng, price, pile_total, pile_free "
+        "SELECT station_id, name, address, lat, lng, price "
         "FROM stations;"));
     if (!q.isActive()) return Api::err(Api::ServerError, q.lastError().text());
 
+    const auto counts = livePileCounts(db);
     QJsonArray arr;
     while (q.next()) {
         const double sLat = q.value(3).toDouble();
         const double sLng = q.value(4).toDouble();
+        const int stationId = q.value(0).toInt();
+        const auto c = counts.value(stationId, {0, 0});
         QJsonObject s;
-        s["station_id"] = q.value(0).toInt();
+        s["station_id"] = stationId;
         s["name"] = q.value(1).toString();
         s["address"] = q.value(2).toString();
         s["price"] = q.value(5).toDouble();
-        s["pile_total"] = q.value(6).toInt();
-        s["pile_free"] = q.value(7).toInt();
+        s["pile_total"] = c.first;
+        s["pile_free"] = c.second;
         s["distance"] = distanceKm(lat, lng, sLat, sLng);
         arr.append(s);
     }
@@ -96,11 +148,12 @@ Api::Reply StationService::detail(const QJsonObject& data) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
-        "SELECT name, address, lat, lng, price, pile_total, pile_free "
+        "SELECT name, address, lat, lng, price "
         "FROM stations WHERE station_id = ?;"));
     q.addBindValue(stationId);
     if (!q.exec() || !q.next()) return Api::err(Api::NotFound, QStringLiteral("充电站不存在"));
 
+    const auto c = pileCountsOf(db, stationId);
     QJsonObject out;
     out["station_id"] = stationId;
     out["name"] = q.value(0).toString();
@@ -108,8 +161,8 @@ Api::Reply StationService::detail(const QJsonObject& data) {
     out["lat"] = q.value(2).toDouble();
     out["lng"] = q.value(3).toDouble();
     out["price"] = q.value(4).toDouble();
-    out["pile_total"] = q.value(5).toInt();
-    out["pile_free"] = q.value(6).toInt();
+    out["pile_total"] = c.first;
+    out["pile_free"] = c.second;
     return Api::okData(out);
 }
 
@@ -140,25 +193,175 @@ Api::Reply StationService::pileDetailList(const QJsonObject& data) {
     return Api::okData(out);
 }
 
+// STATION_RECOMMEND：需求20 智能充电站推荐
+// 直线距离 Top5 初筛 -> 腾讯驾车距离矩阵（真实路网距离/时长）-> 加权综合评分
+// 评分维度：驾车距离 0.30 / 驾车时长 0.25 / 价格 0.20 / 空闲率 0.25（权重见文件顶部）
+// 腾讯 API 失败时降级为直线距离估算（*1.4 路网系数、30km/h），保证流程不断。
+Api::Reply StationService::recommend(const QJsonObject& data) {
+    const double lat = data.value("lat").toDouble();
+    const double lng = data.value("lng").toDouble();
+    if (qFuzzyIsNull(lat) && qFuzzyIsNull(lng)) {
+        return Api::err(Api::InvalidParam, QStringLiteral("缺少有效坐标"));
+    }
+
+    // 60s 缓存：同坐标（3位小数内）不重复调用腾讯地图
+    const QString cacheKey =
+        QStringLiteral("%1,%2").arg(lat, 0, 'f', 3).arg(lng, 0, 'f', 3);
+    {
+        QMutexLocker lock(&g_recoCacheMutex);
+        const auto it = g_recoCache.constFind(cacheKey);
+        if (it != g_recoCache.constEnd()
+            && it->first.secsTo(QDateTime::currentDateTime()) < 60) {
+            QJsonObject out;
+            out["stations"] = it->second;
+            return Api::okData(out);
+        }
+    }
+
+    QSqlDatabase db = DbManager::threadDb();
+    QSqlQuery q(db);
+    q.exec(QStringLiteral(
+        "SELECT station_id, name, address, lat, lng, price "
+        "FROM stations;"));
+    if (!q.isActive()) return Api::err(Api::ServerError, q.lastError().text());
+
+    const auto counts = livePileCounts(db);
+
+    // 1) 直线距离初筛 Top5（控制腾讯矩阵调用量）
+    struct Cand { QJsonObject obj; double straight; };
+    QVector<Cand> cands;
+    while (q.next()) {
+        const double sLat = q.value(3).toDouble();
+        const double sLng = q.value(4).toDouble();
+        const int stationId = q.value(0).toInt();
+        const auto c = counts.value(stationId, {0, 0});
+        QJsonObject s;
+        s["station_id"] = stationId;
+        s["name"] = q.value(1).toString();
+        s["address"] = q.value(2).toString();
+        s["lat"] = sLat;
+        s["lng"] = sLng;
+        s["price"] = q.value(5).toDouble();
+        s["pile_total"] = c.first;
+        s["pile_free"] = c.second;
+        const double d = distanceKm(lat, lng, sLat, sLng);
+        s["straight_km"] = d;
+        cands.append({s, d});
+    }
+    if (cands.isEmpty()) {
+        QJsonObject out;
+        out["stations"] = QJsonArray();
+        return Api::okData(out);
+    }
+    std::sort(cands.begin(), cands.end(),
+              [](const Cand& a, const Cand& b) { return a.straight < b.straight; });
+    if (cands.size() > 5) cands.resize(5);
+
+    // 2) 腾讯驾车距离矩阵：一次请求算完 Top5 各组的真实驾车距离/时长
+    QVector<QPair<double, double>> tos;
+    for (const auto& c : cands)
+        tos.append({c.obj.value("lat").toDouble(), c.obj.value("lng").toDouble()});
+    QString routeErr;
+    const QVector<TencentApi::RouteInfo> routes =
+        TencentApi::drivingMatrix(lat, lng, tos, &routeErr);
+    const bool routeOk = routes.size() == cands.size();
+
+    // 3) 评分维度数据 + 归一化 + 加权
+    const int n = static_cast<int>(cands.size());
+    QVector<double> d(n), t(n), p(n), f(n);
+    double minD = 1e18, maxD = 0.0, minT = 1e18, maxT = 0.0;
+    double minP = 1e18, maxP = 0.0, minF = 1e18, maxF = 0.0;
+    for (int i = 0; i < n; ++i) {
+        const double straight = cands[i].obj.value("straight_km").toDouble();
+        if (routeOk) {
+            d[i] = routes[i].distMeters / 1000.0;
+            t[i] = routes[i].durSeconds / 60.0;
+        } else {
+            d[i] = straight * 1.4;        // 直线->路网 经验系数
+            t[i] = d[i] / 30.0 * 60.0;     // 按 30km/h 估算时长
+        }
+        p[i] = cands[i].obj.value("price").toDouble();
+        const int total = cands[i].obj.value("pile_total").toInt();
+        const int freeCnt = cands[i].obj.value("pile_free").toInt();
+        f[i] = total > 0 ? static_cast<double>(freeCnt) / total : 0.0;
+
+        minD = qMin(minD, d[i]); maxD = qMax(maxD, d[i]);
+        minT = qMin(minT, t[i]); maxT = qMax(maxT, t[i]);
+        minP = qMin(minP, p[i]); maxP = qMax(maxP, p[i]);
+        minF = qMin(minF, f[i]); maxF = qMax(maxF, f[i]);
+    }
+
+    // min-max 归一化；全相等时取 0.5 避免除零
+    const auto norm = [](double v, double mn, double mx) {
+        return mx > mn ? (v - mn) / (mx - mn) : 0.5;
+    };
+    QVector<double> score(n);
+    int recoIdx = 0, fastIdx = 0;
+    for (int i = 0; i < n; ++i) {
+        // 距离/时长/价格越小越好 -> 反向；空闲率越大越好 -> 正向
+        score[i] = kWDist * (1.0 - norm(d[i], minD, maxD))
+                 + kWTime * (1.0 - norm(t[i], minT, maxT))
+                 + kWPrice * (1.0 - norm(p[i], minP, maxP))
+                 + kWFree * norm(f[i], minF, maxF);
+        if (score[i] > score[recoIdx]) recoIdx = i;
+        if (t[i] < t[fastIdx]) fastIdx = i;
+    }
+
+    // 4) 输出顺序：综合得分最高的站排第一（推荐位），其余按驾车时长升序
+    QVector<int> order(n);
+    for (int i = 0; i < n; ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        const bool aRec = (a == recoIdx);
+        const bool bRec = (b == recoIdx);
+        if (aRec != bRec) return aRec;   // 推荐位永远第一
+        return t[a] < t[b];              // 其余按所需时间升序
+    });
+
+    QJsonArray arr;
+    for (const int i : order) {
+        QJsonObject s = cands[i].obj;
+        s["drive_km"] = d[i];
+        s["drive_min"] = t[i];
+        s["score"] = score[i];
+        s["recommend"] = (i == recoIdx);
+        s["fastest"] = (i == fastIdx);
+        arr.append(s);
+    }
+
+    {
+        QMutexLocker lock(&g_recoCacheMutex);
+        g_recoCache.insert(cacheKey, {QDateTime::currentDateTime(), arr});
+    }
+
+    QJsonObject out;
+    out["stations"] = arr;
+    out["route_ok"] = routeOk;
+    if (!routeOk) out["route_error"] = routeErr;
+    return Api::okData(out);
+}
+
 Api::Reply StationService::mgmtList(const QJsonObject& /*data*/) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.exec(QStringLiteral(
-        "SELECT station_id, name, address, lat, lng, price, pile_total, pile_free "
+        "SELECT station_id, name, address, lat, lng, price "
         "FROM stations ORDER BY station_id;"));
     if (!q.isActive()) return Api::err(Api::ServerError, q.lastError().text());
 
+    const auto counts = livePileCounts(db);
     QJsonArray arr;
     while (q.next()) {
+        const int stationId = q.value(0).toInt();
+        const auto c = counts.value(stationId, {0, 0});
         QJsonObject s;
-        s["station_id"] = q.value(0).toInt();
+        s["station_id"] = stationId;
         s["name"] = q.value(1).toString();
         s["address"] = q.value(2).toString();
         s["lat"] = q.value(3).toDouble();
         s["lng"] = q.value(4).toDouble();
         s["price"] = q.value(5).toDouble();
-        s["pile_total"] = q.value(6).toInt();
-        s["pile_free"] = q.value(7).toInt();
+        s["pile_total"] = c.first;
+        s["pile_free"] = c.second;
         arr.append(s);
     }
 
