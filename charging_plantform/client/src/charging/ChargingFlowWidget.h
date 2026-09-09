@@ -6,7 +6,7 @@
 class QLabel;
 class QPushButton;
 class QCheckBox;
-class QDateTimeEdit;
+class QComboBox;
 class QTimer;
 
 // 充电业务模块-需求8/9/10：未完成订单检测 / 充电预约 / 充电订单生成
@@ -37,6 +37,7 @@ private slots:
 private:
     void doReserve();
     void createOrder(int pileId);
+    void populateSlots();         // 生成当天剩余的半小时预约时段
     void cancelReservation();
     void checkUnfinishedOrder();
     void render();                // 根据当前状态统一刷新按钮与提示
@@ -45,7 +46,7 @@ private:
     QLabel* m_statusLabel;
     QLabel* m_pileLabel;
     QCheckBox* m_scheduleCheck;
-    QDateTimeEdit* m_timeEdit;
+    QComboBox* m_slotCombo;       // 预约时段下拉（固定半小时）
     QPushButton* m_actionBtn;     // 主操作按钮
     QPushButton* m_cancelBtn;     // 取消预约
     QPushButton* m_settleBtn;     // 结算

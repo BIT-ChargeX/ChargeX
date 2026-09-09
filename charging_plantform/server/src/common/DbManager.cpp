@@ -56,6 +56,7 @@ void DbManager::init(const QString& dbPath) {
     createSchema(db);
     ensurePileRealtimeColumns(db);
     ensurePasswordColumn(db);   // 兼容旧库：给 users 表补 password 列
+    ensureReservePenaltyColumn(db);   // 兼容旧库：补预约超时处罚计数列
     seedDemo(db);
 }
 
@@ -98,6 +99,23 @@ void DbManager::ensurePasswordColumn(QSqlDatabase db) {
     }
 }
 
+// 兼容旧库迁移：users 表若缺少 reserve_penalty 列则补上（预约超时处罚计数）
+void DbManager::ensureReservePenaltyColumn(QSqlDatabase db) {
+    QSqlQuery q(db);
+    q.exec(QStringLiteral("PRAGMA table_info(users);"));
+    bool has = false;
+    while (q.next()) {
+        if (q.value(1).toString() == QStringLiteral("reserve_penalty")) { has = true; break; }
+    }
+    if (!has) {
+        QSqlQuery alt(db);
+        if (!alt.exec(QStringLiteral(
+                "ALTER TABLE users ADD COLUMN reserve_penalty INTEGER NOT NULL DEFAULT 0;"))) {
+            qWarning() << "[DbManager] 添加 reserve_penalty 列失败:" << alt.lastError().text();
+        }
+    }
+}
+
 void DbManager::createSchema(QSqlDatabase db) {
     QSqlQuery q(db);
     const QStringList ddl = {
@@ -111,6 +129,7 @@ void DbManager::createSchema(QSqlDatabase db) {
                 balance     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
                 password    VARCHAR(64) NOT NULL DEFAULT '',
                 status      INTEGER NOT NULL DEFAULT 1,
+                reserve_penalty INTEGER NOT NULL DEFAULT 0,
                 reg_time    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );)SQL"),
         // 充电站表
