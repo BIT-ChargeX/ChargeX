@@ -129,6 +129,7 @@ void ConnectionHandler::processFrames() {
             else if (cmd == Api::CmdOrderReserve)      reply = OrderService::reserve(data);
             else if (cmd == Api::CmdOrderCreate)       reply = OrderService::create(data);
             else if (cmd == Api::CmdOrderSettle)       reply = OrderService::settle(data);
+            else if (cmd == Api::CmdOrderSettlePreview) reply = OrderService::settlePreview(data);
             else if (cmd == Api::CmdOrderList)         reply = OrderService::listOrders(data);
             else if (cmd == Api::CmdAdminLogin)        reply = AdminService::login(data);
             else if (cmd == Api::CmdAdminLogout)       reply = AdminService::logout(data);

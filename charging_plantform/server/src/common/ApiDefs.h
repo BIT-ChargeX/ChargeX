@@ -38,6 +38,7 @@ inline constexpr const char* CmdOrderCheckUnfinished = "ORDER_CHECK_UNFINISHED";
 inline constexpr const char* CmdOrderReserve          = "ORDER_RESERVE";
 inline constexpr const char* CmdOrderCreate           = "ORDER_CREATE";
 inline constexpr const char* CmdOrderSettle           = "ORDER_SETTLE";   // 结算：服务端计算费用并扣减余额
+inline constexpr const char* CmdOrderSettlePreview    = "ORDER_SETTLE_PREVIEW"; // 结算预估：返回当前应扣金额（只读，不扣费）
 inline constexpr const char* CmdOrderList             = "ORDER_LIST";     // 我的订单：查询用户全部充电订单
 // 管理端（除 ADMIN_LOGIN/ADMIN_LOGOUT 外，请求 data 均需携带 token：
 // ADMIN_LOGIN 成功后返回 token，分发器对管理命令做会话校验）
