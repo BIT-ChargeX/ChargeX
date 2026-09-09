@@ -6,12 +6,16 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QCheckBox>
-#include <QDateTimeEdit>
+#include <QComboBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QFont>
 #include <QTimer>
+
+namespace {
+constexpr int kSlotSeconds = 30 * 60;   // 预约时段长度（秒）
+}
 
 ChargingFlowWidget::ChargingFlowWidget(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
@@ -34,19 +38,16 @@ ChargingFlowWidget::ChargingFlowWidget(QWidget* parent) : QWidget(parent) {
     m_pileLabel->setWordWrap(true);
     layout->addWidget(m_pileLabel);
 
-    // 预约到指定时间（可选）
-    m_scheduleCheck = new QCheckBox(QStringLiteral("预约到指定时间"), this);
+    // 预约到固定时段（当天半小时整点）
+    m_scheduleCheck = new QCheckBox(QStringLiteral("预约时间段"), this);
     m_scheduleCheck->setChecked(false);
     layout->addWidget(m_scheduleCheck);
 
-    m_timeEdit = new QDateTimeEdit(this);
-    m_timeEdit->setCalendarPopup(true);
-    m_timeEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
-    m_timeEdit->setMinimumDateTime(QDateTime::currentDateTime());
-    m_timeEdit->setMaximumDateTime(QDateTime::currentDateTime().addDays(1));
-    m_timeEdit->setDateTime(QDateTime::currentDateTime().addSecs(3600));
-    m_timeEdit->setEnabled(false);
-    layout->addWidget(m_timeEdit);
+    m_slotCombo = new QComboBox(this);
+    m_slotCombo->setFixedHeight(38);
+    m_slotCombo->setEnabled(false);
+    layout->addWidget(m_slotCombo);
+    populateSlots();
 
     m_actionBtn = new QPushButton(QStringLiteral("立即开始充电"), this);
     m_actionBtn->setObjectName(QStringLiteral("primaryBtn"));
@@ -125,9 +126,31 @@ void ChargingFlowWidget::startChargingWithPile(const QJsonObject& pile) {
 }
 
 void ChargingFlowWidget::onScheduleToggled(bool checked) {
-    m_timeEdit->setEnabled(checked);
+    m_slotCombo->setEnabled(checked);
     // 切换后刷新主按钮文案（立即开始 / 提交预约）
     render();
+}
+
+// 生成当天剩余的半小时预约时段（严格晚于当前时刻的整点/半点）
+void ChargingFlowWidget::populateSlots() {
+    m_slotCombo->clear();
+    const QDateTime now = QDateTime::currentDateTime();
+
+    QDateTime slot(now.date(), QTime(now.time().hour(), now.time().minute(), 0));
+    const int m = slot.time().minute();
+    slot = slot.addSecs((m % 30 == 0 ? 30 : 30 - m % 30) * 60);
+
+    const QDateTime endOfDay(now.date(), QTime(23, 30));
+    while (slot <= endOfDay) {
+        const QString label = QStringLiteral("%1 ~ %2")
+            .arg(slot.toString(QStringLiteral("HH:mm")))
+            .arg(slot.addSecs(kSlotSeconds).toString(QStringLiteral("HH:mm")));
+        m_slotCombo->addItem(label, slot.toString(Qt::ISODate));
+        slot = slot.addSecs(kSlotSeconds);
+    }
+    if (m_slotCombo->count() == 0) {
+        m_slotCombo->addItem(QStringLiteral("今日已无可预约时段"), QString());
+    }
 }
 
 // 统一刷新界面：根据「是否有未完成订单 + 是否预约占用 + 是否到点」决定按钮与提示
@@ -135,7 +158,7 @@ void ChargingFlowWidget::render() {
     const bool loggedIn = AppSession::instance().isLoggedIn();
     if (!loggedIn) {
         m_scheduleCheck->setEnabled(false);
-        m_timeEdit->setEnabled(false);
+        m_slotCombo->setEnabled(false);
         m_actionBtn->setEnabled(false);
         m_cancelBtn->hide();
         m_settleBtn->hide();
@@ -145,12 +168,14 @@ void ChargingFlowWidget::render() {
 
     const bool hasUnfinished = m_unfinishedOrderId > 0;
     const bool isReserved = (m_unfinishedStatus == QStringLiteral("预约占用"));
-    const bool timeUp = isReserved && m_reserveTime.isValid()
-                        && m_reserveTime <= QDateTime::currentDateTime();
+    const QDateTime nowDt = QDateTime::currentDateTime();
+    const bool timeUp = isReserved && m_reserveTime.isValid() && m_reserveTime <= nowDt;
+    const bool slotEnded = isReserved && m_reserveTime.isValid()
+                           && nowDt >= m_reserveTime.addSecs(kSlotSeconds);
 
-    // 时间选择器仅在"无未完成订单"时可用
+    // 时段选择仅在"无未完成订单"时可用
     m_scheduleCheck->setEnabled(!hasUnfinished);
-    m_timeEdit->setEnabled(!hasUnfinished && m_scheduleCheck->isChecked());
+    m_slotCombo->setEnabled(!hasUnfinished && m_scheduleCheck->isChecked());
 
     m_settleBtn->hide();
     m_cancelBtn->hide();
@@ -161,17 +186,26 @@ void ChargingFlowWidget::render() {
     if (hasUnfinished && isReserved) {
         m_actionBtn->show();
         m_cancelBtn->show();
+        if (slotEnded) {
+            // 时段已结束仍未开充：交给服务端标记超时并施加处罚（会清空未完成状态）
+            m_actionBtn->setEnabled(false);
+            setStatus(QStringLiteral("预约时段已结束，正在处理超时…"), false);
+            checkUnfinishedOrder();
+            return;
+        }
         if (timeUp) {
             m_actionBtn->setText(QStringLiteral("开始充电"));
             m_actionBtn->setEnabled(true);
-            setStatus(QStringLiteral("预约时间已到，点击「开始充电」。"), true);
+            setStatus(QStringLiteral("预约时段已到，点击「开始充电」。"), true);
+            const qint64 ms = nowDt.msecsTo(m_reserveTime.addSecs(kSlotSeconds));
+            if (ms > 0) m_countdownTimer->start(static_cast<int>(ms));
         } else {
             m_actionBtn->setText(QStringLiteral("开始充电"));
             m_actionBtn->setEnabled(false);
             setStatus(QStringLiteral("已预约，将于 %1 开始充电（单号 #%2）。")
                           .arg(m_reserveTime.toString(QStringLiteral("yyyy-MM-dd HH:mm")))
                           .arg(m_unfinishedOrderId), true);
-            const qint64 ms = QDateTime::currentDateTime().msecsTo(m_reserveTime);
+            const qint64 ms = nowDt.msecsTo(m_reserveTime);
             if (ms > 0) m_countdownTimer->start(static_cast<int>(ms));
         }
         return;
@@ -195,7 +229,7 @@ void ChargingFlowWidget::render() {
         ? QStringLiteral("提交预约") : QStringLiteral("立即开始充电"));
     if (hasPile) {
         setStatus(m_scheduleCheck->isChecked()
-            ? QStringLiteral("电桩已选好，选择预约时间后点击「提交预约」。")
+            ? QStringLiteral("电桩已选好，选择预约时段后点击「提交预约」。")
             : QStringLiteral("电桩已选好，点击「立即开始充电」。"), true);
     } else {
         setStatus(QStringLiteral("请先在「找桩」页选择一个空闲电桩"), false);
@@ -219,11 +253,21 @@ void ChargingFlowWidget::onActionClicked() {
         return;
     }
 
-    doReserve();
+    if (m_scheduleCheck->isChecked()) {
+        doReserve();                                          // 预约到固定时段
+    } else {
+        createOrder(m_pendingPile.value("pile_id").toInt());  // 立即开始充电
+    }
 }
 
 void ChargingFlowWidget::doReserve() {
     const int pileId = m_pendingPile.value("pile_id").toInt();
+    const QString slotIso = m_slotCombo->currentData().toString();
+    if (slotIso.isEmpty()) {
+        setStatus(QStringLiteral("今日已无可预约时段"), false);
+        return;
+    }
+
     m_busy = true;
     m_actionBtn->setEnabled(false);
     setStatus(QStringLiteral("正在提交预约…"), true);
@@ -231,9 +275,7 @@ void ChargingFlowWidget::doReserve() {
     QJsonObject d;
     d["user_id"] = AppSession::instance().userId();
     d["pile_id"] = pileId;
-    if (m_scheduleCheck->isChecked()) {
-        d["reserve_time"] = m_timeEdit->dateTime().toString(Qt::ISODate);
-    }
+    d["reserve_time"] = slotIso;
 
     NetClient::instance().sendRequest(Api::CmdOrderReserve, d,
         [this, pileId](const QJsonObject& resp, int code, const QString& msg) {
@@ -243,17 +285,11 @@ void ChargingFlowWidget::doReserve() {
                 render();
                 return;
             }
-            const int orderId = resp.value("reservation_id").toInt();
-            const bool immediate = resp.value("is_immediate").toBool(true);
-            if (immediate) {
-                createOrder(pileId);
-            } else {
-                m_unfinishedOrderId = orderId;
-                m_unfinishedPileId = pileId;
-                m_unfinishedStatus = QStringLiteral("预约占用");
-                m_reserveTime = QDateTime::fromString(resp.value("reserve_time").toString(), Qt::ISODate);
-                render();
-            }
+            m_unfinishedOrderId = resp.value("reservation_id").toInt();
+            m_unfinishedPileId = pileId;
+            m_unfinishedStatus = QStringLiteral("预约占用");
+            m_reserveTime = QDateTime::fromString(resp.value("reserve_time").toString(), Qt::ISODate);
+            render();
         });
 }
 

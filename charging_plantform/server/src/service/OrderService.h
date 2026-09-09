@@ -6,6 +6,8 @@
 namespace OrderService {
 
 Api::Reply checkUnfinished(const QJsonObject& data);
+// 扫描所有过期的“预约占用”订单：超时则标记“已超时”、释放电桩并施加处罚。幂等，可被后台定时器与各业务入口调用。
+void sweepExpiredReservations();
 Api::Reply reserve(const QJsonObject& data);
 Api::Reply create(const QJsonObject& data);
 Api::Reply settle(const QJsonObject& data);   // ORDER_SETTLE

@@ -123,6 +123,7 @@ inline constexpr const char* kCharging = "充电中";
 inline constexpr const char* kPending  = "待结算";
 inline constexpr const char* kDone     = "已完成";
 inline constexpr const char* kCanceled = "已取消";
+inline constexpr const char* kTimeout  = "已超时";
 }
 
 }

@@ -14,6 +14,9 @@
 
 namespace {
 
+constexpr int kSlotMinutes = 30;            // 预约时段长度（分钟）
+constexpr int kReservePenaltyOrders = 2;     // 预约超时后需完成的充电订单数
+
 bool userOk(QSqlDatabase& db, int userId) {
     QSqlQuery q(db);
     q.prepare(QStringLiteral("SELECT status FROM users WHERE user_id = ?;"));
@@ -31,9 +34,67 @@ QString maskPhone(const QString& phone) {
 
 } // namespace
 
+// 扫描所有“预约占用”订单：时段结束仍未开充 → 标记“已超时”、释放电桩、给用户施加处罚。
+// 幂等（只处理 status=预约占用 且已过时段末的订单），可被后台定时器与各业务入口重复调用。
+void OrderService::sweepExpiredReservations() {
+    QSqlDatabase db = DbManager::threadDb();
+    const QDateTime now = QDateTime::currentDateTime();
+
+    struct Expired { int orderId; int userId; int pileId; };
+    QList<Expired> expired;
+    {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral(
+            "SELECT order_id, user_id, pile_id, reserve_time FROM orders WHERE status = ?;"));
+        q.addBindValue(QString(Api::OrderStatus::kReserved));
+        if (!q.exec()) return;
+        while (q.next()) {
+            const QDateTime rt = QDateTime::fromString(q.value(3).toString(), Qt::ISODate);
+            if (!rt.isValid()) continue;
+            if (now >= rt.addSecs(kSlotMinutes * 60)) {
+                expired.append({q.value(0).toInt(), q.value(1).toInt(), q.value(2).toInt()});
+            }
+        }
+    }
+
+    for (const auto& e : expired) {
+        db.transaction();
+
+        QSqlQuery upd(db);
+        upd.prepare(QStringLiteral(
+            "UPDATE orders SET status = ?, end_time = ? WHERE order_id = ? AND status = ?;"));
+        upd.addBindValue(QString(Api::OrderStatus::kTimeout));
+        upd.addBindValue(now.toString(Qt::ISODate));
+        upd.addBindValue(e.orderId);
+        upd.addBindValue(QString(Api::OrderStatus::kReserved));
+        if (!upd.exec() || upd.numRowsAffected() == 0) {
+            db.rollback();
+            continue;
+        }
+
+        QSqlQuery freePile(db);
+        freePile.prepare(QStringLiteral(
+            "UPDATE piles SET status = ? WHERE pile_id = ? AND status = ?;"));
+        freePile.addBindValue(QString(Api::PileStatus::kIdle));
+        freePile.addBindValue(e.pileId);
+        freePile.addBindValue(QString(Api::PileStatus::kReserved));
+        freePile.exec();
+
+        QSqlQuery pen(db);
+        pen.prepare(QStringLiteral("UPDATE users SET reserve_penalty = ? WHERE user_id = ?;"));
+        pen.addBindValue(kReservePenaltyOrders);
+        pen.addBindValue(e.userId);
+        pen.exec();
+
+        db.commit();
+    }
+}
+
 Api::Reply OrderService::checkUnfinished(const QJsonObject& data) {
     const int userId = data.value("user_id").toInt();
     if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    sweepExpiredReservations();
 
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
@@ -68,9 +129,21 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
     }
     const QString reserveTimeStr = data.value("reserve_time").toString();
 
+    sweepExpiredReservations();
+
     QSqlDatabase db = DbManager::threadDb();
     if (!userOk(db, userId)) {
         return Api::err(Api::StateConflict, QStringLiteral("用户不存在或已被冻结"));
+    }
+
+    // 超时处罚：预约超时后需完成若干充电订单才能再次预约
+    QSqlQuery pen(db);
+    pen.prepare(QStringLiteral("SELECT reserve_penalty FROM users WHERE user_id = ?;"));
+    pen.addBindValue(userId);
+    if (pen.exec() && pen.next() && pen.value(0).toInt() > 0) {
+        return Api::err(Api::StateConflict,
+                        QStringLiteral("您上次预约超时，需完成 %1 个充电订单后才能再次预约")
+                            .arg(pen.value(0).toInt()));
     }
 
     // 需求8硬规则：用户存在未完成订单（预约/充电中/待结算）时禁止再次预约
@@ -108,19 +181,17 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
         return Api::err(Api::StateConflict, QStringLiteral("该电桩已有进行中的预约或订单"));
     }
 
-    // 计算计划开始时间：空/过去时间 = 立即；未来时间 = 预约（最远 1 天）
+    // 预约时段校验：必须是当天、未来、半小时整点（如 14:00 / 14:30）
     const QDateTime now = QDateTime::currentDateTime();
-    QDateTime reserveTime = now;
-    bool immediate = true;
-    if (!reserveTimeStr.isEmpty()) {
-        const QDateTime t = QDateTime::fromString(reserveTimeStr, Qt::ISODate);
-        if (t.isValid() && t > now) {
-            reserveTime = t;
-            immediate = false;
-        }
+    const QDateTime reserveTime = QDateTime::fromString(reserveTimeStr, Qt::ISODate);
+    if (!reserveTime.isValid() || reserveTime <= now) {
+        return Api::err(Api::InvalidParam, QStringLiteral("请选择当天未来的预约时段"));
     }
-    if (reserveTime > now.addDays(1)) {
-        return Api::err(Api::InvalidParam, QStringLiteral("预约时间最远不能超过 1 天"));
+    if (reserveTime.date() != now.date()) {
+        return Api::err(Api::InvalidParam, QStringLiteral("预约时段仅限当天"));
+    }
+    if (reserveTime.time().minute() % kSlotMinutes != 0 || reserveTime.time().second() != 0) {
+        return Api::err(Api::InvalidParam, QStringLiteral("预约时段必须为半小时整点"));
     }
     const QString reserveTimeIso = reserveTime.toString(Qt::ISODate);
 
@@ -150,7 +221,6 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
     QJsonObject out;
     out["reservation_id"] = orderId;
     out["reserve_time"] = reserveTimeIso;
-    out["is_immediate"] = immediate;
     return Api::okData(out);
 }
 
@@ -160,6 +230,8 @@ Api::Reply OrderService::create(const QJsonObject& data) {
     if (userId <= 0 || pileId <= 0) {
         return Api::err(Api::InvalidParam, QStringLiteral("参数不完整"));
     }
+
+    sweepExpiredReservations();
 
     QSqlDatabase db = DbManager::threadDb();
     if (!userOk(db, userId)) {
@@ -361,6 +433,15 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     pile.addBindValue(hours);
     pile.addBindValue(pileId);
     pile.exec();
+
+    // 每完成一笔订单，抵扣一次超时处罚（若处于处罚期内）
+    QSqlQuery pen(db);
+    pen.prepare(QStringLiteral(
+        "UPDATE users SET reserve_penalty = "
+        "CASE WHEN reserve_penalty > 0 THEN reserve_penalty - 1 ELSE 0 END "
+        "WHERE user_id = ?;"));
+    pen.addBindValue(userId);
+    pen.exec();
 
     db.commit();
 
