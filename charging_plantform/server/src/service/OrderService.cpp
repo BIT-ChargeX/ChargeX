@@ -38,7 +38,8 @@ Api::Reply OrderService::checkUnfinished(const QJsonObject& data) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
-        "SELECT order_id FROM orders WHERE user_id = ? AND status IN (?,?,?) "
+        "SELECT order_id, pile_id, status, reserve_time FROM orders "
+        "WHERE user_id = ? AND status IN (?,?,?) "
         "ORDER BY order_id DESC LIMIT 1;"));
     q.addBindValue(userId);
     q.addBindValue(QString(Api::OrderStatus::kReserved));
@@ -50,6 +51,9 @@ Api::Reply OrderService::checkUnfinished(const QJsonObject& data) {
     if (q.next()) {
         out["has_unfinished"] = true;
         out["order_id"] = q.value(0).toInt();
+        out["pile_id"] = q.value(1).toInt();
+        out["status"] = q.value(2).toString();
+        out["reserve_time"] = q.value(3).toString();
     } else {
         out["has_unfinished"] = false;
     }
@@ -62,7 +66,7 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
     if (userId <= 0 || pileId <= 0) {
         return Api::err(Api::InvalidParam, QStringLiteral("参数不完整"));
     }
-    const QString timeSlot = data.value("time_slot").toString();
+    const QString reserveTimeStr = data.value("reserve_time").toString();
 
     QSqlDatabase db = DbManager::threadDb();
     if (!userOk(db, userId)) {
@@ -104,7 +108,22 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
         return Api::err(Api::StateConflict, QStringLiteral("该电桩已有进行中的预约或订单"));
     }
 
-    const QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+    // 计算计划开始时间：空/过去时间 = 立即；未来时间 = 预约（最远 1 天）
+    const QDateTime now = QDateTime::currentDateTime();
+    QDateTime reserveTime = now;
+    bool immediate = true;
+    if (!reserveTimeStr.isEmpty()) {
+        const QDateTime t = QDateTime::fromString(reserveTimeStr, Qt::ISODate);
+        if (t.isValid() && t > now) {
+            reserveTime = t;
+            immediate = false;
+        }
+    }
+    if (reserveTime > now.addDays(1)) {
+        return Api::err(Api::InvalidParam, QStringLiteral("预约时间最远不能超过 1 天"));
+    }
+    const QString reserveTimeIso = reserveTime.toString(Qt::ISODate);
+
     db.transaction();
 
     QSqlQuery ins(db);
@@ -112,7 +131,7 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
         "INSERT INTO orders (user_id, pile_id, reserve_time, status) VALUES (?,?,?,?);"));
     ins.addBindValue(userId);
     ins.addBindValue(pileId);
-    ins.addBindValue(now);
+    ins.addBindValue(reserveTimeIso);
     ins.addBindValue(QString(Api::OrderStatus::kReserved));
     if (!ins.exec()) {
         db.rollback();
@@ -130,6 +149,8 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
 
     QJsonObject out;
     out["reservation_id"] = orderId;
+    out["reserve_time"] = reserveTimeIso;
+    out["is_immediate"] = immediate;
     return Api::okData(out);
 }
 
@@ -148,14 +169,24 @@ Api::Reply OrderService::create(const QJsonObject& data) {
     // 查找该用户对该桩的待开始预约（预约占用）
     QSqlQuery sel(db);
     sel.prepare(QStringLiteral(
-        "SELECT order_id FROM orders WHERE user_id = ? AND pile_id = ? AND status = ? "
+        "SELECT order_id, reserve_time FROM orders WHERE user_id = ? AND pile_id = ? AND status = ? "
         "ORDER BY order_id DESC LIMIT 1;"));
     sel.addBindValue(userId);
     sel.addBindValue(pileId);
     sel.addBindValue(QString(Api::OrderStatus::kReserved));
     sel.exec();
 
-    int orderId = sel.next() ? sel.value(0).toInt() : 0;
+    int orderId = 0;
+    if (sel.next()) {
+        orderId = sel.value(0).toInt();
+        const QDateTime reserveTime = QDateTime::fromString(sel.value(1).toString(), Qt::ISODate);
+        // 预约时间未到则不允许开始
+        if (reserveTime.isValid() && reserveTime > QDateTime::currentDateTime()) {
+            return Api::err(Api::StateConflict,
+                            QStringLiteral("预约时间未到，请 %1 后再开始充电")
+                                .arg(reserveTime.toString(QStringLiteral("yyyy-MM-dd HH:mm"))));
+        }
+    }
 
     // 没有预约记录则兜底：桩空闲时直接生成订单（模拟“立即充电”）
     if (orderId == 0) {

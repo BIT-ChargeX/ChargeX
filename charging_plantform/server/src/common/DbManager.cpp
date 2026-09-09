@@ -259,9 +259,6 @@ void DbManager::seedDemo(QSqlDatabase db) {
 
     q.exec(QStringLiteral("SELECT COUNT(*) FROM users;"));
     if (q.next() && q.value(0).toInt() == 0) {
-        q.prepare(QStringLiteral(
-            "INSERT INTO users (email, nickname, avatar_url, balance, password, status) "
-            "VALUES (?, ?, '', ?, ?, 1);"));
         const QList<QPair<QString, double>> demoUsers = {
             {QStringLiteral("demo1@qq.com"),  66.00},
             {QStringLiteral("demo2@163.com"), 20.50},
@@ -270,6 +267,9 @@ void DbManager::seedDemo(QSqlDatabase db) {
         // 演示用户统一密码 123456，方便测试"已注册账号"登录
         const QString demoPass = DbManager::hashPassword(QStringLiteral("123456"));
         for (const auto& u : demoUsers) {
+            q.prepare(QStringLiteral(
+                "INSERT INTO users (email, nickname, avatar_url, balance, password, status) "
+                "VALUES (?, ?, '', ?, ?, 1);"));
             q.addBindValue(u.first);
             q.addBindValue(QStringLiteral("用户%1").arg(u.first.left(u.first.indexOf('@'))));
             q.addBindValue(u.second);
