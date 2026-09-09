@@ -304,6 +304,17 @@ void LineChartWidget::setSeries(const QVector<qint64>& tsMs,
     update();
 }
 
+void LineChartWidget::setWindow(qint64 startMs, qint64 endMs) {
+    m_reqStart = startMs;
+    m_reqEnd = endMs;
+    update();
+}
+
+void LineChartWidget::setHint(const QString& text) {
+    m_hint = text;
+    update();
+}
+
 void LineChartWidget::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
@@ -317,18 +328,34 @@ void LineChartWidget::paintEvent(QPaintEvent*) {
     const int plotH = h - top - bottom;
     if (plotW <= 10 || plotH <= 10) return;
 
-    if (m_ts.size() != m_power.size() || m_power.isEmpty()) {
+    const bool hasReq = m_reqStart >= 0 && m_reqEnd > m_reqStart;
+    const bool hasData = !m_power.isEmpty() && m_ts.size() == m_power.size();
+
+    const auto emptyText = [&]() -> QString {
+        if (!m_hint.isEmpty()) return m_hint;
+        if (!hasReq) return QStringLiteral("暂无遥测数据");
+        return QStringLiteral("该时间窗暂无样本（桩未在用或未上报）");
+    };
+
+    // 无请求窗口也无数据：仅提示
+    if (!hasReq && !hasData) {
         p.setPen(Theme::textMuted());
-        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("暂无遥测数据"));
+        p.drawText(rect(), Qt::AlignCenter, emptyText());
         return;
     }
 
-    // 数据范围
-    const qint64 t0 = m_ts.first();
-    const qint64 t1 = m_ts.last();
+    // 时间轴范围：优先“请求窗口（真实时间）”，否则用数据起止
+    const qint64 t0 = hasReq ? m_reqStart
+                             : (hasData ? m_ts.first() : QDateTime::currentMSecsSinceEpoch());
+    const qint64 t1 = hasReq ? m_reqEnd
+                             : (hasData ? m_ts.last() : t0);
     const double spanMs = qMax<qint64>(1, t1 - t0);
+
+    // Y 轴范围：有数据按数据放大，否则 0..1（仅显示时间轴）
     double maxP = 1.0;
-    for (double v : m_power) if (v > maxP) maxP = v;
+    if (hasData) {
+        for (double v : m_power) if (v > maxP) maxP = v;
+    }
     const double yMax = maxP * 1.15;
 
     const QRectF plot(left, top, plotW, plotH);
@@ -352,12 +379,12 @@ void LineChartWidget::paintEvent(QPaintEvent*) {
                    Qt::AlignRight | Qt::AlignVCenter, QString::number(v, 'f', 1));
     }
 
-    // X 轴时间刻度（窗口跨度决定格式）
+    // X 轴时间刻度（按真实窗口绘制，时间轴与墙上时间对应）
     const bool needSec = spanMs < 3600LL * 1000;
     const QString fmt = needSec ? QStringLiteral("HH:mm:ss") : QStringLiteral("HH:mm");
     const int nXTicks = 5;
     for (int t = 0; t < nXTicks; ++t) {
-        const qint64 ts = t0 + spanMs * t / (nXTicks - 1);
+        const qint64 ts = t0 + static_cast<qint64>(spanMs * t / (nXTicks - 1));
         const qreal x = mapX(ts);
         p.setPen(Theme::border());
         p.drawLine(QPointF(x, top), QPointF(x, top + plotH));
@@ -367,6 +394,12 @@ void LineChartWidget::paintEvent(QPaintEvent*) {
                                   .toString(fmt);
         p.drawText(QRectF(x - 45, top + plotH + 6, 90, 16),
                    Qt::AlignHCenter | Qt::AlignTop, label);
+    }
+
+    if (!hasData) {
+        p.setPen(Theme::textMuted());
+        p.drawText(plot, Qt::AlignCenter, emptyText());
+        return;
     }
 
     // 折线
