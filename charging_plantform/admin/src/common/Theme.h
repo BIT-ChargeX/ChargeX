@@ -4,56 +4,62 @@
 
 class QWidget;
 
-// 全局视觉主题：Material 3（浅色 / 天空蓝 seed，继承原藏青+天空蓝品牌）。
+// 全局视觉主题：Minimal Executive（深色 / 强调=青）。
 // 设计令牌：所有颜色只在此定义一次；业务代码通过 objectName 或 Token 引用，
 // QSS 由 Theme::globalQss() 从令牌生成，杜绝手写十六进制漂移。
 namespace Theme {
 
-// ---- 令牌（M3 light scheme，近似由 seed #0369A1 生成） ----
-inline QColor primary()        { return QColor("#00639B"); }   // primary(40)，CTA/选中/链接
-inline QColor onPrimary()      { return QColor("#FFFFFF"); }
-inline QColor primaryContainer(){ return QColor("#CAE9FF"); }  // 强调底（悬停选中/表行）
-inline QColor onPrimaryContainer(){ return QColor("#001E30"); }
-inline QColor secondary()      { return QColor("#4F5E70"); }
-inline QColor onSecondary()    { return QColor("#FFFFFF"); }
-inline QColor secondaryContainer(){ return QColor("#D5E3F6"); }// 导航选中胶囊
-inline QColor onSecondaryContainer(){ return QColor("#0B1F2E"); }
+// ---- 令牌（深色 Minimal Executive） ----
+inline QColor primary()        { return QColor("#35D0BA"); }   // 强调色 青（CTA/选中/曲线）
+inline QColor onPrimary()      { return QColor("#062A24"); }
+inline QColor accentHover()    { return QColor("#57E0CC"); }
+inline QColor accentPressed()  { return QColor("#1FA88F"); }
+inline QColor primaryContainer(){ return QColor("#0E332B"); }  // accent tint（选中底/表行）
+inline QColor onPrimaryContainer(){ return QColor("#B7F6E9"); }
+inline QColor secondary()      { return QColor("#9AA7B4"); }   // 次级前景/图标
+inline QColor onSecondary()    { return QColor("#0F1115"); }
+inline QColor secondaryContainer(){ return QColor("#0C352E"); }// 导航选中底
+inline QColor onSecondaryContainer(){ return QColor("#B7F6E9"); }
 
-inline QColor background()     { return QColor("#F7F9FD"); }   // surface(98)
-inline QColor surface()        { return QColor("#F7F9FD"); }
-inline QColor card()           { return QColor("#FFFFFF"); }   // surface-container-low
-inline QColor surfaceContainer(){ return QColor("#F0F4F8"); }
-inline QColor surfaceHigh()    { return QColor("#E4EAF0"); }   // 表头 / 悬停叠层
-inline QColor onSurface()      { return QColor("#171C20"); }
-inline QColor border()         { return QColor("#C4CAD4"); }   // outline(80)
-inline QColor borderStrong()   { return QColor("#757780"); }   // outline
+inline QColor background()     { return QColor("#0F1115"); }   // 窗口底
+inline QColor surface()        { return QColor("#0F1115"); }
+inline QColor card()           { return QColor("#1B2129"); }   // 卡片/表格
+inline QColor surfaceContainer(){ return QColor("#161A20"); }
+inline QColor surfaceHigh()    { return QColor("#232B35"); }   // hover/表头强调
+inline QColor onSurface()      { return QColor("#E6EAF0"); }
+inline QColor border()         { return QColor("#2A333D"); }
+inline QColor borderStrong()   { return QColor("#3B4651"); }
 
-inline QColor textPrimary()   { return QColor("#171C20"); }
-inline QColor textSecondary() { return QColor("#475569"); }
-inline QColor textMuted()     { return QColor("#64748B"); }
+inline QColor textPrimary()   { return QColor("#E6EAF0"); }
+inline QColor textSecondary() { return QColor("#9AA7B4"); }
+inline QColor textMuted()     { return QColor("#6B7887"); }
 
-inline QColor danger()        { return QColor("#BA1A1A"); }    // error(40)
-inline QColor onDanger()      { return QColor("#FFFFFF"); }
-inline QColor dangerContainer(){ return QColor("#FDE0E0"); }
-inline QColor onDangerContainer(){ return QColor("#410002"); }
-inline QColor success()       { return QColor("#166534"); }    // 语义绿（自定义）
-inline QColor onSuccess()     { return QColor("#FFFFFF"); }
-inline QColor successContainer(){ return QColor("#DCF3E1"); }
+inline QColor danger()        { return QColor("#FF6B6B"); }
+inline QColor onDanger()      { return QColor("#240809"); }
+inline QColor dangerContainer(){ return QColor("#3A1B1E"); }
+inline QColor onDangerContainer(){ return QColor("#FFD4D4"); }
+inline QColor success()       { return QColor("#5FD48C"); }
+inline QColor onSuccess()     { return QColor("#082012"); }
+inline QColor successContainer(){ return QColor("#14321B"); }
+inline QColor info()          { return QColor("#57A9FF"); }
+inline QColor infoContainer() { return QColor("#0E2A49"); }
+inline QColor warning()       { return QColor("#F5B860"); }
+inline QColor warningContainer(){ return QColor("#3A2C0E"); }
 inline QColor accent()        { return primary(); }            // 兼容旧引用（CTA）
 
-// 电桩状态 -> 语义色（文字/前景，M3 chip 深字）
+// 电桩状态 -> 语义色（文字/前景）
 inline QColor statusText(const QString& status) {
-    if (status == QStringLiteral("在用"))     return QColor("#075985");
-    if (status == QStringLiteral("预约占用")) return QColor("#92400E");
+    if (status == QStringLiteral("在用"))     return info();
+    if (status == QStringLiteral("预约占用")) return warning();
     if (status == QStringLiteral("故障"))     return danger();
     if (status == QStringLiteral("闲置"))     return success();
     return textSecondary();
 }
 
-// 电桩状态 -> 语义浅底（chip 容器）
+// 电桩状态 -> 语义深底（chip 容器）
 inline QColor statusBackground(const QString& status) {
-    if (status == QStringLiteral("在用"))     return QColor("#E0F2FE");
-    if (status == QStringLiteral("预约占用")) return QColor("#FEF3C7");
+    if (status == QStringLiteral("在用"))     return infoContainer();
+    if (status == QStringLiteral("预约占用")) return warningContainer();
     if (status == QStringLiteral("故障"))     return dangerContainer();
     if (status == QStringLiteral("闲置"))     return successContainer();
     return surfaceContainer();
@@ -61,19 +67,19 @@ inline QColor statusBackground(const QString& status) {
 
 // 订单状态 -> 语义色（文字/前景）
 inline QColor orderStatusText(const QString& status) {
-    if (status == QStringLiteral("预约占用")) return QColor("#92400E");
-    if (status == QStringLiteral("充电中"))   return QColor("#075985");
-    if (status == QStringLiteral("待结算"))   return QColor("#3730A3");
+    if (status == QStringLiteral("预约占用")) return warning();
+    if (status == QStringLiteral("充电中"))   return info();
+    if (status == QStringLiteral("待结算"))   return QColor("#C9BFFF");
     if (status == QStringLiteral("已完成"))   return success();
     if (status == QStringLiteral("已取消"))   return textMuted();
     return textSecondary();
 }
 
-// 订单状态 -> 语义浅底（chip 容器）
+// 订单状态 -> 语义深底（chip 容器）
 inline QColor orderStatusBackground(const QString& status) {
-    if (status == QStringLiteral("预约占用")) return QColor("#FEF3C7");
-    if (status == QStringLiteral("充电中"))   return QColor("#E0F2FE");
-    if (status == QStringLiteral("待结算"))   return QColor("#E4E1FF");
+    if (status == QStringLiteral("预约占用")) return warningContainer();
+    if (status == QStringLiteral("充电中"))   return infoContainer();
+    if (status == QStringLiteral("待结算"))   return QColor("#2A2450");
     if (status == QStringLiteral("已完成"))   return successContainer();
     if (status == QStringLiteral("已取消"))   return surfaceHigh();
     return surfaceContainer();
