@@ -5,12 +5,16 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QNetworkProxy>
+#include <QRandomGenerator>
 #include <QDebug>
 
 namespace {
 constexpr int kReportMs = 5000;
 constexpr int kReconnectMs = 3000;
 constexpr int kTickSec = 5;
+// 受控随机故障：极低概率 + 并发上限，避免把全库堆成故障
+constexpr int kFaultDenominator = 10000;
+constexpr int kMaxFaults = 1;
 }
 
 SimClient::SimClient(const QString& host, quint16 port, const QString& deviceId,
@@ -159,8 +163,27 @@ void SimClient::sendHello() {
         });
 }
 
+void SimClient::maybeRandomFault() {
+    int faultCount = 0;
+    for (const auto& pm : m_models)
+        if (pm.status() == QStringLiteral("故障")) ++faultCount;
+    if (faultCount >= kMaxFaults) return;
+
+    for (auto& pm : m_models) {
+        if (pm.status() != QStringLiteral("闲置")) continue;
+        if (QRandomGenerator::global()->bounded(kFaultDenominator) < 1) {
+            pm.forceFault();
+            log(QStringLiteral("[桩端] 电桩 %1(%2) 随机故障")
+                    .arg(pm.pileId()).arg(pm.code()));
+            return;   // 同一拍最多再故障一台
+        }
+    }
+}
+
 void SimClient::doReport() {
     if (m_models.isEmpty() || m_socket.state() != QAbstractSocket::ConnectedState) return;
+
+    maybeRandomFault();
 
     QJsonArray reports;
     for (auto& pm : m_models) {

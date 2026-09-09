@@ -1,9 +1,10 @@
 // 东软充电桩平台 —— 服务器（headless，无 GUI）
 // 职责：SQLite 初始化 -> 启动 TCP 业务服务(默认9000) -> 处理三类客户端：
 //        充电用户端(USER_*/STATION_*/ORDER_*)、PC管理端(ADMIN_*/PILE_*/SALES_*)
-// 可选托管模拟终端：自动拉起 ChargingPileSim 提供桩上报（单跑 Server 即可演示功率曲线）。
+// 内置模拟桩：ChargingServer 在进程内模拟充电桩终端（device_id=builtin），
+// 直接复用 PileDeviceService/DeviceRegistry，单跑 Server 即有桩上报功率曲线。
 // 用法：ChargingServer [数据库文件路径] [端口] [simPiles]
-//       环境变量：SIM_PILES(默认自动=全部桩, 0关闭)、PILESIM_BIN(可执行文件路径)
+//       环境变量：SIM_PILES(默认自动=全部桩, 0关闭)
 //       如 ChargingServer charging_platform.db 9000
 
 #include <QCoreApplication>
@@ -15,42 +16,8 @@
 #include "common/TcpServer.h"
 #include "common/ApiDefs.h"
 #include "common/MinioClient.h"
-#include "common/SimSupervisor.h"
 #include "common/SmtpClient.h"
-
-#include <QFileInfo>
-#include <QDir>
-
-// 搜索 ChargingPileSim 可执行文件：优先环境变量 PILESIM_BIN，
-// 否则在可执行文件/工作目录向上逐级查找常见构建位置。
-QString findPileSimBinary() {
-    const QString envBin = qEnvironmentVariable("PILESIM_BIN").trimmed();
-    if (!envBin.isEmpty() && QFileInfo::exists(envBin)) return envBin;
-
-    QStringList baseDirs;
-    baseDirs << QDir::currentPath();
-    QDir dir(QCoreApplication::applicationDirPath());
-    baseDirs << dir.absolutePath();
-    for (int i = 0; i < 4; ++i) {
-        if (!dir.cdUp()) break;
-        baseDirs << dir.absolutePath();
-    }
-
-    const QStringList rels = {
-        QStringLiteral("ChargingPileSim"),
-        QStringLiteral("ChargingPileSim.app/Contents/MacOS/ChargingPileSim"),
-        QStringLiteral("piledev/build/Desktop-Debug/ChargingPileSim"),
-        QStringLiteral("piledev/build/Desktop-Debug/ChargingPileSim/ChargingPileSim"),
-        QStringLiteral("piledev/build/Desktop-Debug/ChargingPileSim.app/Contents/MacOS/ChargingPileSim"),
-    };
-    for (const QString& base : baseDirs) {
-        for (const QString& rel : rels) {
-            const QString cand = QDir(base).filePath(rel);
-            if (QFileInfo::exists(cand)) return cand;
-        }
-    }
-    return QString();
-}
+#include "sim/BuiltinSimEngine.h"
 
 int main(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
@@ -93,7 +60,7 @@ int main(int argc, char* argv[]) {
         else
             simPiles = 0;
         qInfo().noquote()
-            << QStringLiteral("[托管] 未指定台数，按全部桩绑定（%1 台）").arg(simPiles);
+            << QStringLiteral("[内置桩] 未指定台数，按全部桩模拟（%1 台）").arg(simPiles);
     }
 
     // 外部存储：MinIO（文件，如头像上传）。参数经环境变量注入：
@@ -125,23 +92,15 @@ int main(int argc, char* argv[]) {
 
     qInfo().noquote() << QStringLiteral("============================================");
 
-    // 托管模拟终端：Server 自动拉起 ChargingPileSim，使“单跑 Server”即有桩上报
+    // 内置模拟桩引擎：进程内模拟 N 台桩（device_id=builtin），复用 PileDeviceService/DeviceRegistry
     if (simPiles > 0) {
-        const QString bin = findPileSimBinary();
-        if (bin.isEmpty()) {
-            qWarning().noquote()
-                << QStringLiteral("[托管] 未找到 ChargingPileSim 可执行文件，跳过托管"
-                                  "（可用 PILESIM_BIN 指定路径）；功率曲线需另起模拟终端");
-        } else {
-            auto* sim = new SimSupervisor(&app);
-            sim->configure(bin, QStringLiteral("127.0.0.1"), port,
-                           QStringLiteral("sim-child"), simPiles);
-            QObject::connect(&app, &QCoreApplication::aboutToQuit,
-                             sim, &SimSupervisor::stop);
-            sim->start();
-        }
+        auto* sim = new BuiltinSimEngine(&app);
+        sim->configure(QStringLiteral("builtin"), simPiles);
+        QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                         sim, &BuiltinSimEngine::stop);
+        sim->start();
     } else {
-        qInfo().noquote() << QStringLiteral("[托管] 已禁用（SIM_PILES=0）");
+        qInfo().noquote() << QStringLiteral("[内置桩] 已禁用（SIM_PILES=0）");
     }
 
     qInfo().noquote() << QStringLiteral(" 东软充电桩应用管理平台 - 业务服务器");

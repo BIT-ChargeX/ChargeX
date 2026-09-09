@@ -20,6 +20,24 @@
 #include <QVector>
 #include <QBrush>
 #include <QMessageBox>
+#include <QDateTime>
+
+namespace {
+
+// 真实时长格式化：H:MM:SS
+QString fmtDuration(qint64 ms) {
+    if (ms <= 0) return QStringLiteral("-");
+    const qint64 s = ms / 1000;
+    const qint64 h = s / 3600;
+    const qint64 m = (s % 3600) / 60;
+    const qint64 sec = s % 60;
+    return QStringLiteral("%1:%2:%3")
+        .arg(h)
+        .arg(m, 2, 10, QChar('0'))
+        .arg(sec, 2, 10, QChar('0'));
+}
+
+} // namespace
 
 PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
@@ -45,11 +63,12 @@ PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
     pileTitle->setObjectName(QStringLiteral("sectionTitle"));
     pv->addWidget(pileTitle);
     m_pileTable = new QTableWidget(pilePanel);
-    m_pileTable->setColumnCount(8);
+    m_pileTable->setColumnCount(9);
     m_pileTable->setHorizontalHeaderLabels(
         {QStringLiteral("电桩ID"), QStringLiteral("所属充电站"), QStringLiteral("编号"),
          QStringLiteral("类型"), QStringLiteral("功率(kW)"), QStringLiteral("状态"),
-         QStringLiteral("累计次数"), QStringLiteral("累计时长(h)")});
+         QStringLiteral("本次充电时长"), QStringLiteral("累计次数"),
+         QStringLiteral("累计时长(h)")});
     m_pileTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_pileTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_pileTable->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -120,6 +139,12 @@ PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
     connect(m_trendTimer, &QTimer::timeout, this, &PileWidget::loadTrend);
     m_trendTimer->start();
 
+    // 本次充电时长：按真实时间每秒刷新“在用”行
+    m_durationTimer = new QTimer(this);
+    m_durationTimer->setInterval(1000);
+    connect(m_durationTimer, &QTimer::timeout, this, &PileWidget::updateDurationColumn);
+    m_durationTimer->start();
+
     refresh();
 }
 
@@ -127,6 +152,21 @@ void PileWidget::refresh() {
     loadPiles();
     loadOpsLog();
     loadTrend();
+}
+
+// 刷新“本次充电时长”列：仅“在用”且有真实会话起点时按 now−start 实时计算
+void PileWidget::updateDurationColumn() {
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    for (int i = 0; i < m_pileTable->rowCount(); ++i) {
+        QTableWidgetItem* durItem = m_pileTable->item(i, 6);
+        QTableWidgetItem* stItem = m_pileTable->item(i, 5);
+        if (!durItem || !stItem) continue;
+        const qint64 start = durItem->data(Qt::UserRole).toLongLong();
+        if (stItem->text() == QStringLiteral("在用") && start > 0)
+            durItem->setText(fmtDuration(nowMs - start));
+        else
+            durItem->setText(QStringLiteral("-"));
+    }
 }
 
 void PileWidget::loadPiles() {
@@ -153,6 +193,7 @@ void PileWidget::loadPiles() {
                     p.value("type").toString(),
                     QString::number(p.value("power").toDouble()),
                     status,
+                    QStringLiteral("-"),   // 本次充电时长（updateDurationColumn 实时填充）
                     QString::number(p.value("total_times").toInt()),
                     QString::number(p.value("total_hours").toDouble()),
                 };
@@ -162,11 +203,15 @@ void PileWidget::loadPiles() {
                     m_pileTable->setItem(i, c, it);
                 }
                 m_pileTable->item(i, 0)->setData(Qt::UserRole, pileId);
+                // 记录本次充电起点（真实会话 start_time → epoch ms），0 表示无会话
+                m_pileTable->item(i, 6)->setData(
+                    Qt::UserRole, p.value("session_start_ms").toVariant().toLongLong());
 
                 QTableWidgetItem* stItem = m_pileTable->item(i, 5);
                 stItem->setForeground(QBrush(Theme::statusText(status)));
                 stItem->setBackground(QBrush(Theme::statusBackground(status)));
             }
+            updateDurationColumn();
             m_countLabel->setText(QStringLiteral("共 %1 台电桩").arg(piles.size()));
             // 默认选中策略：优先选中第一台“在用”桩（便于直接看实时功率曲线），否则选首行；
             // 用户已手动选中时保持不变
@@ -272,6 +317,8 @@ int PileWidget::currentPileId() {
 void PileWidget::loadTrend() {
     const int pileId = currentPileId();
     if (pileId <= 0) {
+        m_line->setWindow(-1, -1);
+        m_line->setHint(QString());
         m_line->setSeries({}, {});
         m_trendTitle->setText(QStringLiteral("功率曲线（未选择电桩）"));
         return;
@@ -287,11 +334,22 @@ void PileWidget::loadTrend() {
     QJsonObject data;
     AdminSession::instance().attach(data);
     data["pile_id"] = pileId;
-    data["minutes"] = m_trendRange->currentData().toInt();
+    const int minutes = m_trendRange->currentData().toInt();
+    data["minutes"] = minutes;
+
+    // 代次防抖：只接受最后一次选择/刷新的响应，避免旧窗口结果覆盖新窗口
+    const int gen = ++m_trendGen;
+
+    // 先固定 X 轴为“真实窗口 [now-minutes, now]”，即使窗口无点时间轴也正确
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    m_line->setWindow(nowMs - static_cast<qint64>(minutes) * 60 * 1000LL, nowMs);
+    m_line->setHint(QString());
 
     NetClient::instance().sendRequest(Api::CmdPilePowerTrend, data,
-        [this](const QJsonObject& resp, int code, const QString& /*msg*/) {
+        [this, gen](const QJsonObject& resp, int code, const QString& msg) {
+            if (gen != m_trendGen) return;   // 过期响应丢弃
             if (code != 0) {
+                m_line->setHint(QStringLiteral("请求失败：%1").arg(msg));
                 m_line->setSeries({}, {});
                 return;
             }

@@ -58,6 +58,10 @@ public:
 
     // 传入按时间升序的点；传空即显示“暂无遥测数据”
     void setSeries(const QVector<qint64>& tsMs, const QVector<double>& power);
+    // 设置 X 轴真实窗口 [start,end]；即使该窗口无点也会按此范围绘制时间轴
+    void setWindow(qint64 startMs, qint64 endMs);
+    // 自定义空态/提示文案（空串则用默认提示）
+    void setHint(const QString& text);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -65,4 +69,7 @@ protected:
 private:
     QVector<qint64> m_ts;
     QVector<double> m_power;
+    qint64 m_reqStart = -1;
+    qint64 m_reqEnd = -1;
+    QString m_hint;
 };

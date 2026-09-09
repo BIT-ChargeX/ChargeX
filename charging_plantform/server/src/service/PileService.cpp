@@ -24,7 +24,7 @@ Api::Reply PileService::list(const QJsonObject& data) {
     QSqlQuery q(db);
     QString sql = QStringLiteral(
         "SELECT p.pile_id, s.name, p.code, p.type, p.power_kw, p.status, "
-        "p.total_times, p.total_hours "
+        "p.total_times, p.total_hours, p.session_start_ms "
         "FROM piles p LEFT JOIN stations s ON p.station_id = s.station_id ");
     if (stationId > 0) sql += QStringLiteral("WHERE p.station_id = %1 ").arg(stationId);
     sql += QStringLiteral("ORDER BY p.station_id, p.pile_id LIMIT %1 OFFSET %2;")
@@ -43,6 +43,8 @@ Api::Reply PileService::list(const QJsonObject& data) {
         p["status"] = q.value(5).toString();
         p["total_times"] = q.value(6).toInt();
         p["total_hours"] = q.value(7).toDouble();
+        // 本次充电起点由终端模拟上报后落库（无会话=0），管理端据此实时显示时长
+        p["session_start_ms"] = q.value(8).toLongLong();
         arr.append(p);
     }
 

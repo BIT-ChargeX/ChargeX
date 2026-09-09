@@ -146,12 +146,15 @@ Api::Reply PileDeviceService::report(const QJsonObject& data) {
 
         QSqlQuery upd(db);
         upd.prepare(QStringLiteral(
-            "UPDATE piles SET status = ?, soc = ?, cur_power_kw = ?, last_report = ? "
+            "UPDATE piles SET status = ?, soc = ?, cur_power_kw = ?, last_report = ?, "
+            "session_start_ms = ? "
             "WHERE pile_id = ?;"));
         upd.addBindValue(newStatus);
         upd.addBindValue(r.value("soc").toInt());
         upd.addBindValue(r.value("cur_power").toDouble());
         upd.addBindValue(now);
+        // 本次充电起点由充电桩终端模拟并上报（无会话上报 0/缺省则归零）
+        upd.addBindValue(r.value("session_start_ms").toVariant().toLongLong());
         upd.addBindValue(pileId);
         upd.exec();
 
