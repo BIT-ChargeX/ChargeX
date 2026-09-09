@@ -20,7 +20,8 @@ SOURCES += \
     src/common/ConnectionHandler.cpp \
     src/common/SessionManager.cpp \
     src/common/DeviceRegistry.cpp \
-    src/common/SimSupervisor.cpp \
+    src/sim/PileModel.cpp \
+    src/sim/BuiltinSimEngine.cpp \
     src/common/MinioClient.cpp \
     src/common/SmtpClient.cpp \
     src/service/UserService.cpp \
@@ -39,7 +40,8 @@ HEADERS += \
     src/common/ConnectionHandler.h \
     src/common/SessionManager.h \
     src/common/DeviceRegistry.h \
-    src/common/SimSupervisor.h \
+    src/sim/PileModel.h \
+    src/sim/BuiltinSimEngine.h \
     src/common/HttpSync.h \
     src/common/MinioClient.h \
     src/common/SmtpClient.h \

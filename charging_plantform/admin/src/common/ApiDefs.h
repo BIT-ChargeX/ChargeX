@@ -7,7 +7,7 @@
 // 管理命令需携带 ADMIN_LOGIN 返回的 token。
 namespace Api {
 
-inline constexpr const char* kHost = "10.194.77.247";
+inline constexpr const char* kHost = "127.0.0.1";
 inline constexpr int kPort = 9000;
 
 // ---- 管理端命令 ----

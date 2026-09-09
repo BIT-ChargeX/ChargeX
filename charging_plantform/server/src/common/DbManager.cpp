@@ -73,6 +73,7 @@ void DbManager::ensurePileRealtimeColumns(QSqlDatabase db) {
         {"last_report", "ALTER TABLE piles ADD COLUMN last_report DATETIME"},
         {"soc", "ALTER TABLE piles ADD COLUMN soc INTEGER"},
         {"cur_power_kw", "ALTER TABLE piles ADD COLUMN cur_power_kw REAL"},
+        {"session_start_ms", "ALTER TABLE piles ADD COLUMN session_start_ms INTEGER"},
     };
     QSqlQuery q(db);
     for (const auto& a : adds) {
@@ -323,7 +324,8 @@ void DbManager::seedDemo(QSqlDatabase db) {
             q.exec();
         }
 
-        // 每站 4 桩：2 快充(120/60kW) + 2 慢充(7kW)，制造少量故障/在用状态便于演示监控
+        // 每站 4 桩：2 快充(120/60kW) + 2 慢充(7kW)。
+        // 状态分布：闲置:在用 ≈ 1:1（每站奇偶位各一半在用/闲置），并保留 2 台故障供报修演示
         for (int si = 0; si < demos.size(); ++si) {
             int stationId = si + 1;
             for (int pi = 0; pi < 4; ++pi) {
@@ -332,9 +334,9 @@ void DbManager::seedDemo(QSqlDatabase db) {
                 QString type = fast ? QStringLiteral("快充") : QStringLiteral("慢充");
                 QString status = QString(Api::PileStatus::kIdle);
                 if (si == 0 && pi == 3)      status = QString(Api::PileStatus::kFault);
-                else if (si == 1 && pi == 1) status = QString(Api::PileStatus::kInUse);
-                else if (si == 3 && pi == 0) status = QString(Api::PileStatus::kInUse);
                 else if (si == 4 && pi == 2) status = QString(Api::PileStatus::kFault);
+                else if (pi % 2 == 0)        status = QString(Api::PileStatus::kInUse);   // pi0/pi2 → 在用
+                // pi1/pi3 → 闲置
 
                 q.prepare(QStringLiteral(
                     "INSERT INTO piles (station_id, code, type, power_kw, status, total_times, total_hours) "

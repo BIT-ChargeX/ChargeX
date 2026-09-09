@@ -6,7 +6,7 @@
 
 namespace Api {
 
-inline constexpr const char* kHost = "10.194.77.247";
+inline constexpr const char* kHost = "127.0.0.1";
 inline constexpr int kPort = 9000;
 
 // 腾讯地图 WebService Key：演示前填入真实 key；

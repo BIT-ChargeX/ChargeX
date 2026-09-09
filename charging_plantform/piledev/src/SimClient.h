@@ -36,6 +36,7 @@ private:
     void tryConnect();
     void sendRequest(const QString& cmd, const QJsonObject& data, Callback cb = nullptr);
     void sendHello();
+    void maybeRandomFault();
     void doReport();
     void handlePending(const QJsonArray& pending);
     void writeFrame(const QJsonObject& obj);
