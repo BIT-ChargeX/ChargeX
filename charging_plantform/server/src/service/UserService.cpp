@@ -72,15 +72,12 @@ QString fmtTimeLocal(const QString& iso) {
     return dt.isValid() ? dt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : iso;
 }
 
-// 用户累计充电量(kWh)：已完成订单 = 桩功率(kW) × 充电时长(小时)
+// 用户累计充电量(kWh)：已完成订单在结算时写入的 energy_kwh 之和
 double userEnergy(QSqlDatabase& db, int userId) {
     QSqlQuery q(db);
-    q.prepare(QStringLiteral(R"SQL(
-        SELECT COALESCE(SUM(
-                 p.power_kw *
-                 (julianday(o.end_time) - julianday(o.start_time)) * 24.0), 0.0)
-        FROM orders o JOIN piles p ON p.pile_id = o.pile_id
-        WHERE o.user_id = ? AND o.status = ?;)SQL"));
+    q.prepare(QStringLiteral(
+        "SELECT COALESCE(SUM(o.energy_kwh), 0.0) "
+        "FROM orders o WHERE o.user_id = ? AND o.status = ?;"));
     q.addBindValue(userId);
     q.addBindValue(QString(Api::OrderStatus::kDone));
     if (!q.exec()) return 0.0;
@@ -538,12 +535,11 @@ Api::Reply UserService::pointsDetail(const QJsonObject& data) {
     QJsonArray items;
     int earned = 0;
 
-    // 充电所得
+    // 充电所得（每笔已完成订单一条记录，电量取结算时写入的 energy_kwh）
     QSqlQuery q(db);
     q.prepare(QStringLiteral(R"SQL(
-        SELECT o.order_id, o.end_time,
-               p.power_kw * (julianday(o.end_time) - julianday(o.start_time)) * 24.0 AS energy
-        FROM orders o JOIN piles p ON p.pile_id = o.pile_id
+        SELECT o.order_id, o.end_time, o.energy_kwh AS energy
+        FROM orders o
         WHERE o.user_id = ? AND o.status = ?
         ORDER BY o.order_id DESC;)SQL"));
     q.addBindValue(userId);

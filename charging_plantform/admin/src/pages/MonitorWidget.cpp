@@ -86,8 +86,8 @@ MonitorWidget::MonitorWidget(QWidget* parent) : QWidget(parent) {
     m_faultBar->setTextVisible(false);
     m_faultBar->setFixedHeight(10);
     m_faultBar->setStyleSheet(QStringLiteral(
-        "QProgressBar{background:%2;border:none;border-radius:5px;}"
-        "QProgressBar::chunk{background:%1;border-radius:5px;}")
+        "QProgressBar{background:%2;border:none;border-radius:3px;}"
+        "QProgressBar::chunk{background:%1;border-radius:3px;}")
         .arg(Theme::danger().name(), Theme::surfaceHigh().name()));
 
     QWidget* boxInUse = nullptr;

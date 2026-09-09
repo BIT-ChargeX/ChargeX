@@ -183,15 +183,9 @@ QFrame#statCardGreen { border-top: 3px solid @succ; }
 QFrame#statCardRed   { border-top: 3px solid @danger; }
 QFrame#statCardAmber { border-top: 3px solid @warn; }
 QLabel#statValue {
-    font-size: 34px; font-weight: 600; color: @ink;
+    font-size: 24px; font-weight: 600; color: @ink;
 }
-QLabel#statCaption { color: @sub; font-size: 14px; font-weight: 500; }
-
-/* 监控页大数字（比销售页再放大一格） */
-QLabel#statValueBig {
-    font-size: 44px; font-weight: 600; color: @ink;
-}
-QLabel#statCaptionBig { color: @sub; font-size: 17px; font-weight: 500; }
+QLabel#statCaption { color: @sub; font-size: 12px; font-weight: 500; }
 
 /* ================= 表格 ================= */
 QTableWidget, QTableView {
@@ -255,11 +249,11 @@ QWidget#navRail {
 }
 QPushButton[navItem="true"] {
     background: transparent; border: none; color: @sub;
-    border-radius: 8px;
-    padding: 14px 18px;
+    border-radius: 4px;
+    padding: 8px 12px;
     text-align: left;
     font-weight: 500;
-    font-size: 16px;
+    font-size: 13px;
 }
 QPushButton[navItem="true"]:hover { background: @surfH; }
 QPushButton[navItem="true"]:pressed { background: @out; }

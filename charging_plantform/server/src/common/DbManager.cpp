@@ -57,7 +57,9 @@ void DbManager::init(const QString& dbPath) {
     ensurePileRealtimeColumns(db);
     ensurePasswordColumn(db);   // 兼容旧库：给 users 表补 password 列
     ensureReservePenaltyColumn(db);   // 兼容旧库：补预约超时处罚计数列
+    ensureOrdersEnergyColumn(db);      // 兼容旧库：给 orders 表补 energy_kwh 列
     seedDemo(db);
+    backfillOrderEnergy(db);           // 回填历史已完成订单电量（含演示订单）
 }
 
 // 为 piles 表补充“实时遥测”列（充电桩终端上报字段）；幂等，老库无需重建
@@ -117,6 +119,43 @@ void DbManager::ensureReservePenaltyColumn(QSqlDatabase db) {
     }
 }
 
+// 兼容旧库迁移：orders 表若缺少 energy_kwh 列则补上（结算电量，用于碳积分按订单同步）
+void DbManager::ensureOrdersEnergyColumn(QSqlDatabase db) {
+    QSqlQuery q(db);
+    q.exec(QStringLiteral("PRAGMA table_info(orders);"));
+    bool has = false;
+    while (q.next()) {
+        if (q.value(1).toString() == QStringLiteral("energy_kwh")) { has = true; break; }
+    }
+    if (!has) {
+        QSqlQuery alt(db);
+        if (!alt.exec(QStringLiteral(
+                "ALTER TABLE orders ADD COLUMN energy_kwh REAL NOT NULL DEFAULT 0;"))) {
+            qWarning() << "[DbManager] 添加 energy_kwh 列失败:" << alt.lastError().text();
+        }
+    }
+}
+
+// 回填历史「已完成」订单的结算电量，口径与结算计费一致（充电时长下限0.2h、上限12h），
+// 使碳积分明细与历史订单一一对应。幂等：仅更新尚无电量的已完成订单。
+void DbManager::backfillOrderEnergy(QSqlDatabase db) {
+    QSqlQuery q(db);
+    if (!q.exec(QStringLiteral(R"SQL(
+        UPDATE orders
+        SET energy_kwh = (
+            SELECT p.power_kw *
+                   MIN(12.0, MAX(0.2,
+                       (julianday(orders.end_time) - julianday(orders.start_time)) * 24.0))
+            FROM piles p WHERE p.pile_id = orders.pile_id
+        )
+        WHERE orders.status = '已完成'
+          AND (orders.energy_kwh IS NULL OR orders.energy_kwh <= 0)
+          AND orders.start_time IS NOT NULL
+          AND orders.end_time IS NOT NULL;)SQL"))) {
+        qWarning() << "[DbManager] 回填订单电量失败:" << q.lastError().text();
+    }
+}
+
 void DbManager::createSchema(QSqlDatabase db) {
     QSqlQuery q(db);
     const QStringList ddl = {
@@ -167,6 +206,7 @@ void DbManager::createSchema(QSqlDatabase db) {
                 start_time    DATETIME,
                 end_time      DATETIME,
                 amount        DECIMAL(10,2) DEFAULT 0,
+                energy_kwh    REAL NOT NULL DEFAULT 0,
                 status        VARCHAR(12) NOT NULL DEFAULT '待结算',
                 created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );)SQL"),
