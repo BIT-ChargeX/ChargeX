@@ -401,6 +401,7 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     }
     const double amountRaw = powerKw * price * hours;
     const double amount = std::round(amountRaw * 100.0) / 100.0;
+    const double energyKwh = powerKw * hours;   // 本单充电量(kWh)，与计费口径一致
 
     if (balance + 1e-9 < amount) {
         return Api::err(Api::StateConflict,
@@ -411,10 +412,11 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
 
     QSqlQuery upd(db);
     upd.prepare(QStringLiteral(R"SQL(
-        UPDATE orders SET status = '已完成', amount = ?, end_time = ?
+        UPDATE orders SET status = '已完成', amount = ?, end_time = ?, energy_kwh = ?
         WHERE order_id = ?;)SQL"));
     upd.addBindValue(amount);
     upd.addBindValue(now);
+    upd.addBindValue(energyKwh);
     upd.addBindValue(orderId);
     if (!upd.exec()) {
         db.rollback();

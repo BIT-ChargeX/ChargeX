@@ -22,6 +22,8 @@ private:
     static void ensurePileRealtimeColumns(QSqlDatabase db);
     static void ensurePasswordColumn(QSqlDatabase db);
     static void ensureReservePenaltyColumn(QSqlDatabase db);
+    static void ensureOrdersEnergyColumn(QSqlDatabase db);
+    static void backfillOrderEnergy(QSqlDatabase db);
     static void seedDemo(QSqlDatabase db);
 
     static QString s_path;
