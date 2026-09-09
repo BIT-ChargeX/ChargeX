@@ -14,6 +14,9 @@
 
 namespace {
 
+constexpr int kSlotMinutes = 30;            // 预约时段长度（分钟）
+constexpr int kReservePenaltyOrders = 2;     // 预约超时后需完成的充电订单数
+
 bool userOk(QSqlDatabase& db, int userId) {
     QSqlQuery q(db);
     q.prepare(QStringLiteral("SELECT status FROM users WHERE user_id = ?;"));
@@ -31,14 +34,73 @@ QString maskPhone(const QString& phone) {
 
 } // namespace
 
+// 扫描所有“预约占用”订单：时段结束仍未开充 → 标记“已超时”、释放电桩、给用户施加处罚。
+// 幂等（只处理 status=预约占用 且已过时段末的订单），可被后台定时器与各业务入口重复调用。
+void OrderService::sweepExpiredReservations() {
+    QSqlDatabase db = DbManager::threadDb();
+    const QDateTime now = QDateTime::currentDateTime();
+
+    struct Expired { int orderId; int userId; int pileId; };
+    QList<Expired> expired;
+    {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral(
+            "SELECT order_id, user_id, pile_id, reserve_time FROM orders WHERE status = ?;"));
+        q.addBindValue(QString(Api::OrderStatus::kReserved));
+        if (!q.exec()) return;
+        while (q.next()) {
+            const QDateTime rt = QDateTime::fromString(q.value(3).toString(), Qt::ISODate);
+            if (!rt.isValid()) continue;
+            if (now >= rt.addSecs(kSlotMinutes * 60)) {
+                expired.append({q.value(0).toInt(), q.value(1).toInt(), q.value(2).toInt()});
+            }
+        }
+    }
+
+    for (const auto& e : expired) {
+        db.transaction();
+
+        QSqlQuery upd(db);
+        upd.prepare(QStringLiteral(
+            "UPDATE orders SET status = ?, end_time = ? WHERE order_id = ? AND status = ?;"));
+        upd.addBindValue(QString(Api::OrderStatus::kTimeout));
+        upd.addBindValue(now.toString(Qt::ISODate));
+        upd.addBindValue(e.orderId);
+        upd.addBindValue(QString(Api::OrderStatus::kReserved));
+        if (!upd.exec() || upd.numRowsAffected() == 0) {
+            db.rollback();
+            continue;
+        }
+
+        QSqlQuery freePile(db);
+        freePile.prepare(QStringLiteral(
+            "UPDATE piles SET status = ? WHERE pile_id = ? AND status = ?;"));
+        freePile.addBindValue(QString(Api::PileStatus::kIdle));
+        freePile.addBindValue(e.pileId);
+        freePile.addBindValue(QString(Api::PileStatus::kReserved));
+        freePile.exec();
+
+        QSqlQuery pen(db);
+        pen.prepare(QStringLiteral("UPDATE users SET reserve_penalty = ? WHERE user_id = ?;"));
+        pen.addBindValue(kReservePenaltyOrders);
+        pen.addBindValue(e.userId);
+        pen.exec();
+
+        db.commit();
+    }
+}
+
 Api::Reply OrderService::checkUnfinished(const QJsonObject& data) {
     const int userId = data.value("user_id").toInt();
     if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
 
+    sweepExpiredReservations();
+
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
-        "SELECT order_id FROM orders WHERE user_id = ? AND status IN (?,?,?) "
+        "SELECT order_id, pile_id, status, reserve_time FROM orders "
+        "WHERE user_id = ? AND status IN (?,?,?) "
         "ORDER BY order_id DESC LIMIT 1;"));
     q.addBindValue(userId);
     q.addBindValue(QString(Api::OrderStatus::kReserved));
@@ -50,6 +112,9 @@ Api::Reply OrderService::checkUnfinished(const QJsonObject& data) {
     if (q.next()) {
         out["has_unfinished"] = true;
         out["order_id"] = q.value(0).toInt();
+        out["pile_id"] = q.value(1).toInt();
+        out["status"] = q.value(2).toString();
+        out["reserve_time"] = q.value(3).toString();
     } else {
         out["has_unfinished"] = false;
     }
@@ -62,11 +127,23 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
     if (userId <= 0 || pileId <= 0) {
         return Api::err(Api::InvalidParam, QStringLiteral("参数不完整"));
     }
-    const QString timeSlot = data.value("time_slot").toString();
+    const QString reserveTimeStr = data.value("reserve_time").toString();
+
+    sweepExpiredReservations();
 
     QSqlDatabase db = DbManager::threadDb();
     if (!userOk(db, userId)) {
         return Api::err(Api::StateConflict, QStringLiteral("用户不存在或已被冻结"));
+    }
+
+    // 超时处罚：预约超时后需完成若干充电订单才能再次预约
+    QSqlQuery pen(db);
+    pen.prepare(QStringLiteral("SELECT reserve_penalty FROM users WHERE user_id = ?;"));
+    pen.addBindValue(userId);
+    if (pen.exec() && pen.next() && pen.value(0).toInt() > 0) {
+        return Api::err(Api::StateConflict,
+                        QStringLiteral("您上次预约超时，需完成 %1 个充电订单后才能再次预约")
+                            .arg(pen.value(0).toInt()));
     }
 
     // 需求8硬规则：用户存在未完成订单（预约/充电中/待结算）时禁止再次预约
@@ -104,7 +181,20 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
         return Api::err(Api::StateConflict, QStringLiteral("该电桩已有进行中的预约或订单"));
     }
 
-    const QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+    // 预约时段校验：必须是当天、未来、半小时整点（如 14:00 / 14:30）
+    const QDateTime now = QDateTime::currentDateTime();
+    const QDateTime reserveTime = QDateTime::fromString(reserveTimeStr, Qt::ISODate);
+    if (!reserveTime.isValid() || reserveTime <= now) {
+        return Api::err(Api::InvalidParam, QStringLiteral("请选择当天未来的预约时段"));
+    }
+    if (reserveTime.date() != now.date()) {
+        return Api::err(Api::InvalidParam, QStringLiteral("预约时段仅限当天"));
+    }
+    if (reserveTime.time().minute() % kSlotMinutes != 0 || reserveTime.time().second() != 0) {
+        return Api::err(Api::InvalidParam, QStringLiteral("预约时段必须为半小时整点"));
+    }
+    const QString reserveTimeIso = reserveTime.toString(Qt::ISODate);
+
     db.transaction();
 
     QSqlQuery ins(db);
@@ -112,7 +202,7 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
         "INSERT INTO orders (user_id, pile_id, reserve_time, status) VALUES (?,?,?,?);"));
     ins.addBindValue(userId);
     ins.addBindValue(pileId);
-    ins.addBindValue(now);
+    ins.addBindValue(reserveTimeIso);
     ins.addBindValue(QString(Api::OrderStatus::kReserved));
     if (!ins.exec()) {
         db.rollback();
@@ -130,6 +220,7 @@ Api::Reply OrderService::reserve(const QJsonObject& data) {
 
     QJsonObject out;
     out["reservation_id"] = orderId;
+    out["reserve_time"] = reserveTimeIso;
     return Api::okData(out);
 }
 
@@ -140,6 +231,8 @@ Api::Reply OrderService::create(const QJsonObject& data) {
         return Api::err(Api::InvalidParam, QStringLiteral("参数不完整"));
     }
 
+    sweepExpiredReservations();
+
     QSqlDatabase db = DbManager::threadDb();
     if (!userOk(db, userId)) {
         return Api::err(Api::StateConflict, QStringLiteral("用户不存在或已被冻结"));
@@ -148,14 +241,24 @@ Api::Reply OrderService::create(const QJsonObject& data) {
     // 查找该用户对该桩的待开始预约（预约占用）
     QSqlQuery sel(db);
     sel.prepare(QStringLiteral(
-        "SELECT order_id FROM orders WHERE user_id = ? AND pile_id = ? AND status = ? "
+        "SELECT order_id, reserve_time FROM orders WHERE user_id = ? AND pile_id = ? AND status = ? "
         "ORDER BY order_id DESC LIMIT 1;"));
     sel.addBindValue(userId);
     sel.addBindValue(pileId);
     sel.addBindValue(QString(Api::OrderStatus::kReserved));
     sel.exec();
 
-    int orderId = sel.next() ? sel.value(0).toInt() : 0;
+    int orderId = 0;
+    if (sel.next()) {
+        orderId = sel.value(0).toInt();
+        const QDateTime reserveTime = QDateTime::fromString(sel.value(1).toString(), Qt::ISODate);
+        // 预约时间未到则不允许开始
+        if (reserveTime.isValid() && reserveTime > QDateTime::currentDateTime()) {
+            return Api::err(Api::StateConflict,
+                            QStringLiteral("预约时间未到，请 %1 后再开始充电")
+                                .arg(reserveTime.toString(QStringLiteral("yyyy-MM-dd HH:mm"))));
+        }
+    }
 
     // 没有预约记录则兜底：桩空闲时直接生成订单（模拟“立即充电”）
     if (orderId == 0) {
@@ -330,6 +433,15 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     pile.addBindValue(hours);
     pile.addBindValue(pileId);
     pile.exec();
+
+    // 每完成一笔订单，抵扣一次超时处罚（若处于处罚期内）
+    QSqlQuery pen(db);
+    pen.prepare(QStringLiteral(
+        "UPDATE users SET reserve_penalty = "
+        "CASE WHEN reserve_penalty > 0 THEN reserve_penalty - 1 ELSE 0 END "
+        "WHERE user_id = ?;"));
+    pen.addBindValue(userId);
+    pen.exec();
 
     db.commit();
 

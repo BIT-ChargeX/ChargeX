@@ -11,12 +11,14 @@
 #include <QDebug>
 #include <QSqlQuery>
 #include <QStringList>
+#include <QTimer>
 
 #include "common/DbManager.h"
 #include "common/TcpServer.h"
 #include "common/ApiDefs.h"
 #include "common/MinioClient.h"
 #include "common/SmtpClient.h"
+#include "service/OrderService.h"
 #include "sim/BuiltinSimEngine.h"
 
 int main(int argc, char* argv[]) {
@@ -79,6 +81,13 @@ int main(int argc, char* argv[]) {
         qEnvironmentVariable("SMTP_USER", QString()),
         qEnvironmentVariable("SMTP_AUTH_CODE", QString()),
         qEnvironmentVariable("SMTP_FROM", QString()));
+
+    // 预约超时巡检：每 30 秒扫描过期预约，标记超时、释放电桩并施加处罚
+    auto* sweepTimer = new QTimer(&app);
+    QObject::connect(sweepTimer, &QTimer::timeout, []() {
+        OrderService::sweepExpiredReservations();
+    });
+    sweepTimer->start(30000);
 
     TcpServer server;
     QObject::connect(&server, &TcpServer::logMessage, [](const QString& line) {
