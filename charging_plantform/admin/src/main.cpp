@@ -19,6 +19,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("ChargingAdmin"));
     app.setStyle(QStringLiteral("Fusion"));
+    app.setPalette(Theme::darkPalette());
     app.setStyleSheet(Theme::globalQss());
 
     QString host(Api::kHost);

@@ -99,9 +99,11 @@ Api::Reply OrderService::checkUnfinished(const QJsonObject& data) {
     QSqlDatabase db = DbManager::threadDb();
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
-        "SELECT order_id, pile_id, status, reserve_time FROM orders "
-        "WHERE user_id = ? AND status IN (?,?,?) "
-        "ORDER BY order_id DESC LIMIT 1;"));
+        "SELECT o.order_id, o.pile_id, o.status, o.reserve_time, "
+        "p.cur_power_kw, p.charge_done "
+        "FROM orders o LEFT JOIN piles p ON p.pile_id = o.pile_id "
+        "WHERE o.user_id = ? AND o.status IN (?,?,?) "
+        "ORDER BY o.order_id DESC LIMIT 1;"));
     q.addBindValue(userId);
     q.addBindValue(QString(Api::OrderStatus::kReserved));
     q.addBindValue(QString(Api::OrderStatus::kCharging));
@@ -115,6 +117,8 @@ Api::Reply OrderService::checkUnfinished(const QJsonObject& data) {
         out["pile_id"] = q.value(1).toInt();
         out["status"] = q.value(2).toString();
         out["reserve_time"] = q.value(3).toString();
+        out["cur_power"] = q.value(4).toDouble();
+        out["charge_done"] = q.value(5).toInt() == 1;
     } else {
         out["has_unfinished"] = false;
     }

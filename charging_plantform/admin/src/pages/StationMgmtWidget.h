@@ -35,5 +35,6 @@ private:
     QPushButton* m_repairBtn;
     QPushButton* m_refreshBtn;
     QLabel* m_statusLabel;
+    QLabel* m_stationInfo;
     int m_currentStationId = -1;
 };

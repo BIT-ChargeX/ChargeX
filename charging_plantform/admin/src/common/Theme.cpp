@@ -33,6 +33,27 @@ QString Theme::connPillQss(bool ok) {
         .arg(c(fg), c(bg));
 }
 
+QPalette Theme::darkPalette() {
+    QPalette pal;
+    pal.setColor(QPalette::Window, background());
+    pal.setColor(QPalette::WindowText, textPrimary());
+    pal.setColor(QPalette::Base, card());
+    pal.setColor(QPalette::AlternateBase, surfaceContainer());
+    pal.setColor(QPalette::Text, textPrimary());
+    pal.setColor(QPalette::Button, card());
+    pal.setColor(QPalette::ButtonText, textPrimary());
+    pal.setColor(QPalette::BrightText, QColor("#FFFFFF"));
+    pal.setColor(QPalette::Highlight, primaryContainer());
+    pal.setColor(QPalette::HighlightedText, onPrimaryContainer());
+    pal.setColor(QPalette::Link, accent());
+    pal.setColor(QPalette::ToolTipBase, card());
+    pal.setColor(QPalette::ToolTipText, textPrimary());
+    pal.setColor(QPalette::PlaceholderText, textMuted());
+    pal.setColor(QPalette::Disabled, QPalette::Text, textMuted());
+    pal.setColor(QPalette::Disabled, QPalette::ButtonText, textMuted());
+    return pal;
+}
+
 QString Theme::globalQss() {
     // 原始模板用 @token 占位，最后统一替换成令牌色，保证单源。
     QString s = QStringLiteral(R"QSS(

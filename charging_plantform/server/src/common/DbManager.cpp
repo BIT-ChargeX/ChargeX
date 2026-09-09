@@ -76,6 +76,7 @@ void DbManager::ensurePileRealtimeColumns(QSqlDatabase db) {
         {"soc", "ALTER TABLE piles ADD COLUMN soc INTEGER"},
         {"cur_power_kw", "ALTER TABLE piles ADD COLUMN cur_power_kw REAL"},
         {"session_start_ms", "ALTER TABLE piles ADD COLUMN session_start_ms INTEGER"},
+        {"charge_done", "ALTER TABLE piles ADD COLUMN charge_done INTEGER"},
     };
     QSqlQuery q(db);
     for (const auto& a : adds) {

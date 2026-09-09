@@ -1,6 +1,7 @@
 #pragma once
 #include <QString>
 #include <QColor>
+#include <QPalette>
 
 class QWidget;
 
@@ -89,6 +90,9 @@ inline QColor orderStatusBackground(const QString& status) {
 // 告警条（MonitorWidget 底部）/ 连接 pill（MainWindow 顶部）样式字符串
 QString alarmQss(bool ok);
 QString connPillQss(bool ok);
+
+// 深色整体调色板（消除 Fusion 默认浅色在弹出层/边框/下拉露白）
+QPalette darkPalette();
 
 // ---- 全局样式表（由令牌生成） ----
 QString globalQss();

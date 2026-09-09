@@ -22,7 +22,8 @@ public:
     QString code() const { return m_code; }
 
 private:
-    double targetPower() const;
+    void beginSession();
+    void endSession();
 
     int m_pileId = 0;
     QString m_code;
@@ -35,4 +36,8 @@ private:
     int m_totalTimes = 0;
     double m_totalHours = 0.0;
     qint64 m_sessionStartMs = 0;   // 本次充电开始时刻(epoch ms)，由终端模拟记录；无会话=0
+    int m_durationSec = 0;         // 本次充电计划时长(秒)，START 时随机 5~10 分钟
+    int m_elapsedSec = 0;          // 已充时长(秒)
+    double m_startSoc = 50.0;      // 本单起始 SOC
+    bool m_chargeDone = false;     // 本次充电已结束（功率已回 0，等待结算）
 };
