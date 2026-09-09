@@ -10,6 +10,8 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QList>
+#include <QPair>
+#include <QVector>
 #include <cmath>
 
 namespace {
@@ -30,6 +32,121 @@ QString maskPhone(const QString& phone) {
         return phone.left(3) + QStringLiteral("****") + phone.right(4);
     }
     return phone;
+}
+
+// 对 pile_power_log 采样做梯形积分，得 [fromMs, toMs] 区间的电量(kWh)。
+// 头尾缺口按首/末采样值外推，保证边界不丢电量；无采样返回 -1（调用方回退额定功率估算）。
+double integrateEnergyKwh(QSqlDatabase& db, int pileId, qint64 fromMs, qint64 toMs) {
+    QVector<QPair<qint64, double>> pts;
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT ts_ms, power_kw FROM pile_power_log "
+        "WHERE pile_id = ? AND ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms ASC;"));
+    q.addBindValue(pileId);
+    q.addBindValue(fromMs);
+    q.addBindValue(toMs);
+    if (!q.exec() || toMs <= fromMs) return -1.0;
+    while (q.next()) {
+        pts.append({q.value(0).toLongLong(), q.value(1).toDouble()});
+    }
+    if (pts.isEmpty()) return -1.0;
+
+    double energyMsKw = 0.0;   // 毫秒·kW
+    energyMsKw += pts.first().second * static_cast<double>(pts.first().first - fromMs);
+    energyMsKw += pts.last().second * static_cast<double>(toMs - pts.last().first);
+    for (int i = 1; i < pts.size(); ++i) {
+        energyMsKw += 0.5 * (pts[i - 1].second + pts[i].second)
+                      * static_cast<double>(pts[i].first - pts[i - 1].first);
+    }
+    return energyMsKw / 3.6e6;
+}
+
+// 结算上下文：查询订单并计算应付金额/电量（只读，不写库）
+struct SettleContext {
+    int orderId = 0;
+    int pileId = 0;
+    QString status;
+    QString startText;
+    double balance = 0.0;
+    double powerKw = 0.0;
+    double price = 0.0;
+    double hours = 1.0;      // 实际充电时长（start_time 无效时兜底 1.0）
+    double energyKwh = 0.0;  // 实际积分电量（无采样时回退额定功率×钳制时长）
+    double amount = 0.0;     // 应付金额（含 1 元最低消费；预约占用=0）
+};
+
+// 加载结算上下文：未传 order_id 时取最近未完成单 → JOIN 查订单/余额/功率/电价 →
+// 状态校验 → 计费计算。只读，settle 与 settlePreview 共用。
+Api::Reply loadSettleContext(QSqlDatabase& db, int userId, int& orderId, SettleContext& ctx) {
+    if (orderId <= 0) {
+        QSqlQuery latest(db);
+        latest.prepare(QStringLiteral(
+            "SELECT order_id FROM orders WHERE user_id = ? AND status IN (?,?,?) "
+            "ORDER BY order_id DESC LIMIT 1;"));
+        latest.addBindValue(userId);
+        latest.addBindValue(QString(Api::OrderStatus::kReserved));
+        latest.addBindValue(QString(Api::OrderStatus::kCharging));
+        latest.addBindValue(QString(Api::OrderStatus::kPending));
+        if (!latest.exec() || !latest.next())
+            return Api::err(Api::NotFound, QStringLiteral("没有可结算的订单"));
+        orderId = latest.value(0).toInt();
+    }
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(R"SQL(
+        SELECT o.pile_id, o.status, o.start_time, u.balance,
+               p.power_kw, s.price
+        FROM orders o
+        JOIN users u ON u.user_id = o.user_id
+        LEFT JOIN piles p ON p.pile_id = o.pile_id
+        LEFT JOIN stations s ON s.station_id = p.station_id
+        WHERE o.order_id = ? AND o.user_id = ?;)SQL"));
+    q.addBindValue(orderId);
+    q.addBindValue(userId);
+    if (!q.exec() || !q.next()) {
+        return Api::err(Api::NotFound, QStringLiteral("订单不存在"));
+    }
+
+    ctx.orderId = orderId;
+    ctx.pileId = q.value(0).toInt();
+    ctx.status = q.value(1).toString();
+    ctx.startText = q.value(2).toString();
+    ctx.balance = q.value(3).toDouble();
+    ctx.powerKw = q.value(4).toDouble();
+    ctx.price = q.value(5).toDouble();
+
+    if (ctx.status != QString(Api::OrderStatus::kCharging)
+        && ctx.status != QString(Api::OrderStatus::kPending)
+        && ctx.status != QString(Api::OrderStatus::kReserved)) {
+        return Api::err(Api::StateConflict, QStringLiteral("该订单已结算或已取消"));
+    }
+
+    // 预约占用但未开充 → 结算即取消，不产生费用
+    if (ctx.status == QString(Api::OrderStatus::kReserved)) return Api::ok();
+
+    // 按实际功率积分计费：对 pile_power_log 在 [start, start+12h] 内的采样做梯形积分
+    // 得实际电量；最低消费 1 元；无采样（桩未绑定终端等）回退额定功率 × 时长
+    double energyKwh = ctx.powerKw * ctx.hours;    // 本单充电量(kWh)，start_time 无效兜底
+    const QDateTime startDt = QDateTime::fromString(ctx.startText, Qt::ISODate);
+    if (startDt.isValid()) {
+        const QDateTime nowDt = QDateTime::currentDateTime();
+        ctx.hours = qMax(0.0, startDt.secsTo(nowDt) / 3600.0);   // 实际时长（用于桩累计）
+        const qint64 startMs = startDt.toMSecsSinceEpoch();
+        const qint64 endMs = QDateTime::currentMSecsSinceEpoch();
+        const qint64 toMs = qMin(endMs, startMs + static_cast<qint64>(12) * 3600 * 1000LL);
+        const double actual = integrateEnergyKwh(db, ctx.pileId, startMs, toMs);
+        if (actual >= 0.0) {
+            energyKwh = actual;
+        } else {
+            energyKwh = ctx.powerKw * qBound(0.2, ctx.hours, 12.0);  // 无采样：沿用旧口径
+        }
+        energyKwh = std::round(energyKwh * 1000.0) / 1000.0;
+    }
+    ctx.energyKwh = energyKwh;
+    // 起步价：固定最低消费 1 元（不按 0.2h×额定功率收，避免快充桩短单起步过高）
+    ctx.amount = std::round(energyKwh * ctx.price * 100.0) / 100.0;
+    if (ctx.amount < 1.0) ctx.amount = 1.0;
+    return Api::ok();
 }
 
 } // namespace
@@ -323,89 +440,39 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
 
     QSqlDatabase db = DbManager::threadDb();
 
-    // 未指定订单则取用户最近一笔未完成订单
-    if (orderId <= 0) {
-        QSqlQuery latest(db);
-        latest.prepare(QStringLiteral(
-            "SELECT order_id FROM orders WHERE user_id = ? AND status IN (?,?,?) "
-            "ORDER BY order_id DESC LIMIT 1;"));
-        latest.addBindValue(userId);
-        latest.addBindValue(QString(Api::OrderStatus::kReserved));
-        latest.addBindValue(QString(Api::OrderStatus::kCharging));
-        latest.addBindValue(QString(Api::OrderStatus::kPending));
-        if (!latest.exec() || !latest.next())
-            return Api::err(Api::NotFound, QStringLiteral("没有可结算的订单"));
-        orderId = latest.value(0).toInt();
-    }
-
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral(R"SQL(
-        SELECT o.pile_id, o.status, o.start_time, u.balance,
-               p.power_kw, s.price
-        FROM orders o
-        JOIN users u ON u.user_id = o.user_id
-        LEFT JOIN piles p ON p.pile_id = o.pile_id
-        LEFT JOIN stations s ON s.station_id = p.station_id
-        WHERE o.order_id = ? AND o.user_id = ?;)SQL"));
-    q.addBindValue(orderId);
-    q.addBindValue(userId);
-    if (!q.exec() || !q.next()) {
-        return Api::err(Api::NotFound, QStringLiteral("订单不存在"));
-    }
-
-    const int pileId = q.value(0).toInt();
-    const QString status = q.value(1).toString();
-    const QString startText = q.value(2).toString();
-    const double balance = q.value(3).toDouble();
-    const double powerKw = q.value(4).toDouble();
-    const double price = q.value(5).toDouble();
-
-    if (status != QString(Api::OrderStatus::kCharging)
-        && status != QString(Api::OrderStatus::kPending)
-        && status != QString(Api::OrderStatus::kReserved)) {
-        return Api::err(Api::StateConflict, QStringLiteral("该订单已结算或已取消"));
-    }
+    SettleContext ctx;
+    const Api::Reply prep = loadSettleContext(db, userId, orderId, ctx);
+    if (prep.code != Api::Ok) return prep;
 
     const QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
 
     // 预约占用但未开充 → 视为取消，不产生费用
-    if (status == QString(Api::OrderStatus::kReserved)) {
+    if (ctx.status == QString(Api::OrderStatus::kReserved)) {
         db.transaction();
         QSqlQuery upd(db);
         upd.prepare(QStringLiteral("UPDATE orders SET status = ?, end_time = ? WHERE order_id = ?;"));
         upd.addBindValue(QString(Api::OrderStatus::kCanceled));
         upd.addBindValue(now);
-        upd.addBindValue(orderId);
+        upd.addBindValue(ctx.orderId);
         upd.exec();
         QSqlQuery free(db);
         free.prepare(QStringLiteral("UPDATE piles SET status = ? WHERE pile_id = ?;"));
         free.addBindValue(QString(Api::PileStatus::kIdle));
-        free.addBindValue(pileId);
+        free.addBindValue(ctx.pileId);
         free.exec();
         db.commit();
 
         QJsonObject out;
-        out["order_id"] = orderId;
+        out["order_id"] = ctx.orderId;
         out["status"] = QString(Api::OrderStatus::kCanceled);
         out["amount"] = 0.0;
-        out["balance"] = balance;
+        out["balance"] = ctx.balance;
         return Api::okData(out);
     }
 
-    // 模拟计费：充电时长 = 距开始时间（下限0.2h，上限12h）
-    double hours = 1.0;
-    QDateTime startDt = QDateTime::fromString(startText, Qt::ISODate);
-    if (startDt.isValid()) {
-        const double elapsed = startDt.secsTo(QDateTime::currentDateTime()) / 3600.0;
-        hours = qBound(0.2, elapsed, 12.0);
-    }
-    const double amountRaw = powerKw * price * hours;
-    const double amount = std::round(amountRaw * 100.0) / 100.0;
-    const double energyKwh = powerKw * hours;   // 本单充电量(kWh)，与计费口径一致
-
-    if (balance + 1e-9 < amount) {
+    if (ctx.balance + 1e-9 < ctx.amount) {
         return Api::err(Api::StateConflict,
-                        QStringLiteral("余额不足（本次需 ¥%1），请先充值").arg(amount, 0, 'f', 2));
+                        QStringLiteral("余额不足（本次需 ¥%1），请先充值").arg(ctx.amount, 0, 'f', 2));
     }
 
     db.transaction();
@@ -414,10 +481,10 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     upd.prepare(QStringLiteral(R"SQL(
         UPDATE orders SET status = '已完成', amount = ?, end_time = ?, energy_kwh = ?
         WHERE order_id = ?;)SQL"));
-    upd.addBindValue(amount);
+    upd.addBindValue(ctx.amount);
     upd.addBindValue(now);
-    upd.addBindValue(energyKwh);
-    upd.addBindValue(orderId);
+    upd.addBindValue(ctx.energyKwh);
+    upd.addBindValue(ctx.orderId);
     if (!upd.exec()) {
         db.rollback();
         return Api::err(Api::ServerError, upd.lastError().text());
@@ -425,15 +492,15 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
 
     QSqlQuery bal(db);
     bal.prepare(QStringLiteral("UPDATE users SET balance = balance - ? WHERE user_id = ?;"));
-    bal.addBindValue(amount);
+    bal.addBindValue(ctx.amount);
     bal.addBindValue(userId);
     bal.exec();
 
     QSqlQuery pile(db);
     pile.prepare(QStringLiteral(
         "UPDATE piles SET status = '闲置', total_hours = total_hours + ? WHERE pile_id = ?;"));
-    pile.addBindValue(hours);
-    pile.addBindValue(pileId);
+    pile.addBindValue(ctx.hours);
+    pile.addBindValue(ctx.pileId);
     pile.exec();
 
     // 每完成一笔订单，抵扣一次超时处罚（若处于处罚期内）
@@ -448,10 +515,10 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     db.commit();
 
     // 结算完成 → 通知已绑定充电桩终端“断电释放”（未接入则忽略=回退）
-    DeviceRegistry::instance().enqueue(pileId, DeviceCmd::kStop,
-                                       QJsonObject{{"order_id", orderId}});
+    DeviceRegistry::instance().enqueue(ctx.pileId, DeviceCmd::kStop,
+                                       QJsonObject{{"order_id", ctx.orderId}});
 
-    double newBalance = balance - amount;
+    double newBalance = ctx.balance - ctx.amount;
     {
         QSqlQuery sel(db);
         sel.prepare(QStringLiteral("SELECT balance FROM users WHERE user_id = ?;"));
@@ -460,10 +527,33 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     }
 
     QJsonObject out;
-    out["order_id"] = orderId;
+    out["order_id"] = ctx.orderId;
     out["status"] = QString(Api::OrderStatus::kDone);
-    out["amount"] = amount;
+    out["amount"] = ctx.amount;
     out["balance"] = newBalance;
+    out["energy"] = ctx.energyKwh;
+    return Api::okData(out);
+}
+
+// ORDER_SETTLE_PREVIEW：只读预估本次结算金额（不扣费、不改任何状态），供客户端结算前展示
+Api::Reply OrderService::settlePreview(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    int orderId = data.value("order_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    SettleContext ctx;
+    const Api::Reply prep = loadSettleContext(db, userId, orderId, ctx);
+    if (prep.code != Api::Ok) return prep;
+
+    QJsonObject out;
+    out["order_id"] = ctx.orderId;
+    out["status"] = ctx.status;
+    out["amount"] = ctx.amount;
+    out["energy"] = ctx.energyKwh;
+    out["balance"] = ctx.balance;
+    out["price"] = ctx.price;
+    out["start_time"] = ctx.startText;
     return Api::okData(out);
 }
 

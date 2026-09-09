@@ -43,9 +43,9 @@ inline constexpr const char* CmdOrderCheckUnfinished = "ORDER_CHECK_UNFINISHED";
 inline constexpr const char* CmdOrderReserve          = "ORDER_RESERVE";
 inline constexpr const char* CmdOrderCreate           = "ORDER_CREATE";
 inline constexpr const char* CmdOrderSettle           = "ORDER_SETTLE";
+inline constexpr const char* CmdOrderSettlePreview    = "ORDER_SETTLE_PREVIEW"; // 结算预估：返回本次应扣金额（只读）
 inline constexpr const char* CmdOrderList             = "ORDER_LIST";   // 我的订单：查询用户全部充电订单
 // 注：ORDER_SETTLE 结算/扣费/释放电桩的业务逻辑在服务端（OrderService::settle）
-// 结算命令 ORDER_SETTLE 协议 v1.1 尚未冻结，冻结前服务端不会响应，客户端不主动发送。
 
 // ---- 错误码（interface_protocol.md 第4节）----
 enum ErrCode {

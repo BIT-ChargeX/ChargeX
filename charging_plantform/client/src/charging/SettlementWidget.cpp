@@ -9,6 +9,17 @@
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QMessageBox>
+#include <QTimer>
+#include <QHideEvent>
+
+namespace {
+const char* kEstStyleNormal =
+    "background: #e3f2fd; padding: 10px; border-radius: 6px;"
+    "font-size: 15px; font-weight: bold;";
+const char* kEstStyleWarn =
+    "background: #fdecea; padding: 10px; border-radius: 6px;"
+    "font-size: 15px; font-weight: bold; color: #c62828;";
+} // namespace
 
 SettlementWidget::SettlementWidget(QWidget* parent) : QDialog(parent) {
     setWindowTitle(QStringLiteral("订单结算"));
@@ -23,6 +34,14 @@ SettlementWidget::SettlementWidget(QWidget* parent) : QDialog(parent) {
                                                "border-radius: 6px; font-size: 14px;"));
     m_orderLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_orderLabel);
+
+    // 预估金额卡：打开结算页即向服务端查询本次预计扣费（只读），每 5 秒刷新
+    m_estimateLabel = new QLabel(this);
+    m_estimateLabel->setWordWrap(true);
+    m_estimateLabel->setAlignment(Qt::AlignCenter);
+    m_estimateLabel->setStyleSheet(QString::fromLatin1(kEstStyleNormal));
+    m_estimateLabel->hide();
+    layout->addWidget(m_estimateLabel);
 
     m_balanceLabel = new QLabel(this);
     m_balanceLabel->setAlignment(Qt::AlignCenter);
@@ -51,12 +70,22 @@ SettlementWidget::SettlementWidget(QWidget* parent) : QDialog(parent) {
     connect(m_rechargeBtn, &QPushButton::clicked, this, &SettlementWidget::requestRecharge);
     connect(m_okBtn, &QPushButton::clicked, this, &SettlementWidget::accept);
 
+    m_estTimer = new QTimer(this);
+    m_estTimer->setInterval(5000);
+    connect(m_estTimer, &QTimer::timeout, this, &SettlementWidget::queryPreview);
+
     m_balanceLabel->setText(
         QStringLiteral("当前余额：¥%1").arg(AppSession::instance().balance(), 0, 'f', 2));
     connect(&AppSession::instance(), &AppSession::balanceChanged, this,
             [this](double b) {
                 m_balanceLabel->setText(QStringLiteral("当前余额：¥%1").arg(b, 0, 'f', 2));
+                updateEstimateDisplay();   // 充值/扣费后同步刷新“预计剩余余额”
             });
+}
+
+void SettlementWidget::hideEvent(QHideEvent* event) {
+    m_estTimer->stop();   // 弹窗关闭即停止预估轮询
+    QDialog::hideEvent(event);
 }
 
 void SettlementWidget::setBusy(bool busy) {
@@ -73,10 +102,14 @@ void SettlementWidget::setOrderText(const QString& text) {
 
 void SettlementWidget::openWithOrder(int orderId) {
     m_orderId = orderId;
+    m_estAmount = -1.0;
+    m_estimateLabel->hide();
     if (orderId > 0) {
         setOrderText(QStringLiteral("您有未完成的充电订单\n订单号：#%1\n状态：充电中（待结算）")
                          .arg(orderId));
         m_settleBtn->setEnabled(true);
+        queryPreview();
+        m_estTimer->start();
     } else {
         setOrderText(QStringLiteral("正在查询未完成订单…"));
         m_settleBtn->setEnabled(false);
@@ -105,7 +138,54 @@ void SettlementWidget::queryUnfinished() {
             setOrderText(QStringLiteral("您有未完成的充电订单\n订单号：#%1\n状态：充电中（待结算）")
                              .arg(m_orderId));
             m_settleBtn->setEnabled(true);
+            queryPreview();
+            m_estTimer->start();
         });
+}
+
+// 拉取本次结算的预计扣费（服务端只读计算，不扣费），成功后刷新预估卡
+void SettlementWidget::queryPreview() {
+    if (m_orderId <= 0 || !AppSession::instance().isLoggedIn()) return;
+
+    QJsonObject data;
+    data["user_id"] = AppSession::instance().userId();
+    data["order_id"] = m_orderId;
+
+    NetClient::instance().sendRequest(Api::CmdOrderSettlePreview, data,
+        [this](const QJsonObject& resp, int code, const QString& msg) {
+            if (code != 0) {
+                m_estAmount = -1.0;
+                m_estimateLabel->setStyleSheet(QString::fromLatin1(kEstStyleWarn));
+                m_estimateLabel->setText(QStringLiteral("预估金额查询失败：%1").arg(msg));
+                m_estimateLabel->show();
+                return;
+            }
+            m_estAmount = resp.value("amount").toDouble();
+            updateEstimateDisplay();
+            m_estimateLabel->show();
+        });
+}
+
+void SettlementWidget::updateEstimateDisplay() {
+    if (m_estAmount < 0.0) return;
+
+    if (m_estAmount <= 0.0) {
+        m_estimateLabel->setStyleSheet(QString::fromLatin1(kEstStyleNormal));
+        m_estimateLabel->setText(QStringLiteral("该订单为预约单，结算不产生费用（0 元）"));
+        return;
+    }
+
+    const double balance = AppSession::instance().balance();
+    const double remaining = balance - m_estAmount;
+    const bool insufficient = remaining < -1e-9;
+
+    m_estimateLabel->setStyleSheet(QString::fromLatin1(
+        insufficient ? kEstStyleWarn : kEstStyleNormal));
+    QString text = QStringLiteral("本次预计扣费：¥%1\n预计剩余余额：¥%2")
+                       .arg(m_estAmount, 0, 'f', 2)
+                       .arg(remaining, 0, 'f', 2);
+    if (insufficient) text += QStringLiteral("\n余额不足，请先充值");
+    m_estimateLabel->setText(text);
 }
 
 void SettlementWidget::onSettleClicked() {
@@ -127,6 +207,7 @@ void SettlementWidget::onSettleClicked() {
                     QMessageBox::information(this, QStringLiteral("余额不足"),
                                              msg + QStringLiteral("\n请先充值后再次结算。"));
                 }
+                queryPreview();   // 结算失败后刷新预估（金额仍在增长）
                 return;
             }
             const double amount = resp.value("amount").toDouble();
@@ -136,6 +217,8 @@ void SettlementWidget::onSettleClicked() {
                                       .arg(m_orderId)
                                       .arg(amount, 0, 'f', 2));
             m_noteLabel->setText(QStringLiteral("电桩已释放为【闲置】，余额已扣减。"));
+            m_estTimer->stop();
+            m_estimateLabel->hide();
             m_settleBtn->setEnabled(false);
             emit settled();
         });
