@@ -33,6 +33,27 @@ QString Theme::connPillQss(bool ok) {
         .arg(c(fg), c(bg));
 }
 
+QPalette Theme::darkPalette() {
+    QPalette pal;
+    pal.setColor(QPalette::Window, background());
+    pal.setColor(QPalette::WindowText, textPrimary());
+    pal.setColor(QPalette::Base, card());
+    pal.setColor(QPalette::AlternateBase, surfaceContainer());
+    pal.setColor(QPalette::Text, textPrimary());
+    pal.setColor(QPalette::Button, card());
+    pal.setColor(QPalette::ButtonText, textPrimary());
+    pal.setColor(QPalette::BrightText, QColor("#FFFFFF"));
+    pal.setColor(QPalette::Highlight, primaryContainer());
+    pal.setColor(QPalette::HighlightedText, onPrimaryContainer());
+    pal.setColor(QPalette::Link, accent());
+    pal.setColor(QPalette::ToolTipBase, card());
+    pal.setColor(QPalette::ToolTipText, textPrimary());
+    pal.setColor(QPalette::PlaceholderText, textMuted());
+    pal.setColor(QPalette::Disabled, QPalette::Text, textMuted());
+    pal.setColor(QPalette::Disabled, QPalette::ButtonText, textMuted());
+    return pal;
+}
+
 QString Theme::globalQss() {
     // 原始模板用 @token 占位，最后统一替换成令牌色，保证单源。
     QString s = QStringLiteral(R"QSS(
@@ -162,9 +183,15 @@ QFrame#statCardGreen { border-top: 3px solid @succ; }
 QFrame#statCardRed   { border-top: 3px solid @danger; }
 QFrame#statCardAmber { border-top: 3px solid @warn; }
 QLabel#statValue {
-    font-size: 24px; font-weight: 600; color: @ink;
+    font-size: 34px; font-weight: 600; color: @ink;
 }
-QLabel#statCaption { color: @sub; font-size: 12px; font-weight: 500; }
+QLabel#statCaption { color: @sub; font-size: 14px; font-weight: 500; }
+
+/* 监控页大数字（比销售页再放大一格） */
+QLabel#statValueBig {
+    font-size: 44px; font-weight: 600; color: @ink;
+}
+QLabel#statCaptionBig { color: @sub; font-size: 17px; font-weight: 500; }
 
 /* ================= 表格 ================= */
 QTableWidget, QTableView {
@@ -228,11 +255,11 @@ QWidget#navRail {
 }
 QPushButton[navItem="true"] {
     background: transparent; border: none; color: @sub;
-    border-radius: 4px;
-    padding: 8px 12px;
+    border-radius: 8px;
+    padding: 14px 18px;
     text-align: left;
     font-weight: 500;
-    font-size: 13px;
+    font-size: 16px;
 }
 QPushButton[navItem="true"]:hover { background: @surfH; }
 QPushButton[navItem="true"]:pressed { background: @out; }

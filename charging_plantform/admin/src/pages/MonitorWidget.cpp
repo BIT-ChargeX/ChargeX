@@ -37,9 +37,9 @@ QLabel* makeStatCard(const QString& caption, const QString& accentName,
     v->setContentsMargins(18, 16, 18, 16);
     v->setSpacing(4);
     auto* value = new QLabel(QStringLiteral("-"), box);
-    value->setObjectName(QStringLiteral("statValue"));
+    value->setObjectName(QStringLiteral("statValueBig"));
     auto* cap = new QLabel(caption, box);
-    cap->setObjectName(QStringLiteral("statCaption"));
+    cap->setObjectName(QStringLiteral("statCaptionBig"));
     v->addWidget(value);
     v->addWidget(cap);
 
@@ -49,12 +49,12 @@ QLabel* makeStatCard(const QString& caption, const QString& accentName,
     } else {
         // 占位与故障卡进度条等高，保证三卡视觉结构一致
         auto* pad = new QWidget(box);
-        pad->setFixedHeight(6);
+        pad->setFixedHeight(10);
         v->addWidget(pad);
     }
     // 三卡统一拉伸策略与最小高度 → 行内等宽等高
     box->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    box->setMinimumHeight(120);
+    box->setMinimumHeight(136);
     if (boxOut) *boxOut = box;
     return value;
 }
@@ -84,16 +84,16 @@ MonitorWidget::MonitorWidget(QWidget* parent) : QWidget(parent) {
     m_faultBar->setRange(0, 100);
     m_faultBar->setValue(0);
     m_faultBar->setTextVisible(false);
-    m_faultBar->setFixedHeight(6);
+    m_faultBar->setFixedHeight(10);
     m_faultBar->setStyleSheet(QStringLiteral(
-        "QProgressBar{background:%2;border:none;border-radius:3px;}"
-        "QProgressBar::chunk{background:%1;border-radius:3px;}")
+        "QProgressBar{background:%2;border:none;border-radius:5px;}"
+        "QProgressBar::chunk{background:%1;border-radius:5px;}")
         .arg(Theme::danger().name(), Theme::surfaceHigh().name()));
 
     QWidget* boxInUse = nullptr;
     QWidget* boxIdle = nullptr;
     QWidget* boxFault = nullptr;
-    m_inUseValue = makeStatCard(QStringLiteral("在用（含预约）"), QStringLiteral("Sky"), this, &boxInUse);
+    m_inUseValue = makeStatCard(QStringLiteral("在用"), QStringLiteral("Sky"), this, &boxInUse);
     m_idleValue = makeStatCard(QStringLiteral("闲置"), QStringLiteral("Green"), this, &boxIdle);
     m_faultValue = makeStatCard(QStringLiteral("故障"), QStringLiteral("Red"), this, &boxFault, m_faultBar);
 
@@ -198,14 +198,17 @@ void MonitorWidget::loadSummary() {
             m_inUseValue->setText(QString::number(inUse));
             m_idleValue->setText(QString::number(idle));
             m_faultValue->setText(QString::number(fault));
-            m_faultBar->setValue(qBound(0, static_cast<int>(qRound(ratio)), 100));
+            // 红条以“20% 阈值”为终点：占比达到 20% 即走满整条
+            const int barValue = qBound(0,
+                static_cast<int>(qRound(qMin(ratio, 100.0) / 20.0 * 100.0)), 100);
+            m_faultBar->setValue(barValue);
             m_refreshLabel->setText(QStringLiteral("最后刷新 %1")
                                         .arg(QDateTime::currentDateTime()
                                                  .toString(QStringLiteral("HH:mm:ss"))));
 
             struct Row { QString name; int count; };
             QList<Row> rows = {
-                {QStringLiteral("在用（含预约）"), inUse},
+                {QStringLiteral("在用"), inUse},
                 {QStringLiteral("闲置"), idle},
                 {QStringLiteral("故障"), fault},
             };

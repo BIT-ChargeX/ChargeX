@@ -3,7 +3,7 @@
 #include <QJsonObject>
 #include <QtGlobal>
 
-// 单台充电桩的“物理层”模拟：状态机 + SOC/功率推进 + 随机故障注入。
+// 单台充电桩的“物理层”模拟：状态机 + 随机 5~10 分钟充电时长 + 功率 0→额定→降 0。
 // 说明：服务器是业务/状态真源，本模型负责模拟真实世界表现并上报遥测；
 //       “预约占用”由服务器维护，不在此模型内体现。
 class PileModel {
@@ -17,7 +17,7 @@ public:
     QString code() const { return m_code; }
     QString status() const { return m_status; }
 
-    // 每次上报前推进模拟（充电时长/电量；故障由 SimClient 受控注入）
+    // 每次上报前推进模拟（充电时长/功率；故障由 SimClient 受控注入）
     void tick(int seconds);
 
     // 执行服务器下发的控制指令
@@ -29,9 +29,10 @@ public:
     void forceFault();
 
 private:
+    void beginSession();
+    void endSession();
     void setFault();
     void setIdle();
-    double targetPower() const;
 
     int m_pileId = 0;
     QString m_code;
@@ -43,5 +44,9 @@ private:
     int m_totalTimes = 0;
     double m_totalHours = 0.0;
     qint64 m_sessionStartMs = 0;   // 本次充电开始时刻(epoch ms)，终端模拟；无会话=0
+    int m_durationSec = 0;         // 本次充电计划时长(秒)，START 时随机 5~10 分钟
+    int m_elapsedSec = 0;
+    double m_startSoc = 50.0;
+    bool m_chargeDone = false;     // 本次充电已结束（功率回 0，等待结算）
     QString m_status = QStringLiteral("闲置");
 };

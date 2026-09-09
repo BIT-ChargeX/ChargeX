@@ -105,11 +105,11 @@ QIcon navIcon(int kind, const QColor& color) {
 
 NavRail::NavRail(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("navRail"));
-    setFixedWidth(216);
+    setFixedWidth(320);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(14, 18, 14, 18);
-    layout->setSpacing(6);
+    layout->setContentsMargins(18, 24, 18, 24);
+    layout->setSpacing(12);
     layout->addStretch(1);   // 底部占位，条目始终插在它之前 → 顶对齐
 
     m_group = new QButtonGroup(this);
@@ -123,7 +123,7 @@ void NavRail::addItem(const QString& label, int iconKind) {
     btn->setProperty("navItem", QStringLiteral("true"));
     btn->setCheckable(true);
     btn->setIcon(navIcon(iconKind, Theme::secondary()));
-    btn->setIconSize(QSize(20, 20));
+    btn->setIconSize(QSize(26, 26));
     btn->setCursor(Qt::PointingHandCursor);
 
     m_items.append(btn);

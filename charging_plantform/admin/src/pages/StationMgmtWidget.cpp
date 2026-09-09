@@ -63,10 +63,10 @@ StationMgmtWidget::StationMgmtWidget(QWidget* parent) : QWidget(parent) {
     stationTitle->setObjectName(QStringLiteral("sectionTitle"));
     sv->addWidget(stationTitle);
     m_stationTable = new QTableWidget(stPanel);
-    m_stationTable->setColumnCount(8);
+    m_stationTable->setColumnCount(6);
     m_stationTable->setHorizontalHeaderLabels(
         {QStringLiteral("ID"), QStringLiteral("站名"), QStringLiteral("地址"),
-         QStringLiteral("纬度"), QStringLiteral("经度"), QStringLiteral("电价(元/度)"),
+         QStringLiteral("电价(元/度)"),
          QStringLiteral("桩总数"), QStringLiteral("空闲")});
     m_stationTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_stationTable->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -79,13 +79,19 @@ StationMgmtWidget::StationMgmtWidget(QWidget* parent) : QWidget(parent) {
     auto* plPanel = new QWidget(splitter);
     plPanel->setMinimumWidth(360);
     auto* pv = new QVBoxLayout(plPanel);
-    auto* pileTitle = new QLabel(QStringLiteral("站内电桩（编号 / 类型 / 状态）"), plPanel);
+    // 单击站行 → 此处完整显示该站 站名/地址（自动换行，不受表格列宽截断影响）
+    m_stationInfo = new QLabel(QStringLiteral("请点击左侧充电站查看完整信息"), plPanel);
+    m_stationInfo->setWordWrap(true);
+    m_stationInfo->setObjectName(QStringLiteral("cardCaption"));
+    pv->addWidget(m_stationInfo);
+    pv->addSpacing(4);
+    auto* pileTitle = new QLabel(QStringLiteral("站内电桩（类型 / 状态）"), plPanel);
     pileTitle->setObjectName(QStringLiteral("sectionTitle"));
     pv->addWidget(pileTitle);
     m_pileTable = new QTableWidget(plPanel);
-    m_pileTable->setColumnCount(4);
+    m_pileTable->setColumnCount(3);
     m_pileTable->setHorizontalHeaderLabels(
-        {QStringLiteral("电桩ID"), QStringLiteral("编号"), QStringLiteral("类型"), QStringLiteral("状态")});
+        {QStringLiteral("电桩ID"), QStringLiteral("类型"), QStringLiteral("状态")});
     m_pileTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_pileTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_pileTable->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -138,8 +144,6 @@ void StationMgmtWidget::loadStations() {
                     QString::number(s.value("station_id").toInt()),
                     s.value("name").toString(),
                     s.value("address").toString(),
-                    QString::number(s.value("lat").toDouble()),
-                    QString::number(s.value("lng").toDouble()),
                     QString::number(s.value("price").toDouble(), 'f', 2),
                     QString::number(s.value("pile_total").toInt()),
                     QString::number(s.value("pile_free").toInt()),
@@ -173,6 +177,18 @@ void StationMgmtWidget::loadStations() {
 void StationMgmtWidget::onStationRowChanged(int row) {
     if (row < 0 || !m_stationTable->item(row, 0)) return;
     const int stationId = m_stationTable->item(row, 0)->data(Qt::UserRole).toInt();
+
+    // 完整展示所选站点的站名/地址（表格里被截断的此处能看全）
+    const QString name = m_stationTable->item(row, 1)
+                             ? m_stationTable->item(row, 1)->text()
+                             : QString();
+    const QString addr = m_stationTable->item(row, 2)
+                             ? m_stationTable->item(row, 2)->text()
+                             : QString();
+    m_stationInfo->setText(name.isEmpty()
+        ? QStringLiteral("请点击左侧充电站查看完整信息")
+        : QStringLiteral("站点：%1\n地址：%2").arg(name, addr));
+
     if (stationId != m_currentStationId) {
         m_currentStationId = stationId;
         loadPilesOfStation(stationId);
@@ -197,7 +213,6 @@ void StationMgmtWidget::loadPilesOfStation(int stationId) {
                 const QString status = p.value("status").toString();
                 const QStringList cols = {
                     QString::number(p.value("pile_id").toInt()),
-                    p.value("code").toString(),
                     p.value("type").toString(),
                     status,
                 };
@@ -208,7 +223,7 @@ void StationMgmtWidget::loadPilesOfStation(int stationId) {
                 }
                 m_pileTable->item(r, 0)->setData(Qt::UserRole, p.value("pile_id").toInt());
 
-                QTableWidgetItem* stItem = m_pileTable->item(r, 3);
+                QTableWidgetItem* stItem = m_pileTable->item(r, 2);
                 stItem->setForeground(QBrush(Theme::statusText(status)));
                 stItem->setBackground(QBrush(Theme::statusBackground(status)));
             }
@@ -250,14 +265,14 @@ void StationMgmtWidget::onSetIdle() {
 void StationMgmtWidget::onRepair() {
     const int row = m_pileTable->currentRow();
     if (row < 0 || !m_pileTable->item(row, 0)) return;
-    const QString status = m_pileTable->item(row, 3)->text();
+    const QString status = m_pileTable->item(row, 2)->text();
     if (status != QStringLiteral("故障")) return;
 
     const int pileId = m_pileTable->item(row, 0)->data(Qt::UserRole).toInt();
-    const QString code = m_pileTable->item(row, 1)->text();
+    const QString type = m_pileTable->item(row, 1)->text();
     if (QMessageBox::question(this, QStringLiteral("发起报修"),
                               QStringLiteral("确认对电桩 %1（%2）发起报修？报修成功后将恢复为闲置。")
-                                  .arg(pileId).arg(code),
+                                  .arg(pileId).arg(type),
                               QMessageBox::Yes | QMessageBox::No,
                               QMessageBox::No) != QMessageBox::Yes) {
         return;
@@ -284,10 +299,10 @@ void StationMgmtWidget::onRepair() {
 
 void StationMgmtWidget::onPileTableDoubleClicked(int row, int column) {
     Q_UNUSED(column)
-    if (row < 0 || !m_pileTable->item(row, 0) || !m_pileTable->item(row, 3)) return;
+    if (row < 0 || !m_pileTable->item(row, 0) || !m_pileTable->item(row, 2)) return;
 
     const int pileId = m_pileTable->item(row, 0)->data(Qt::UserRole).toInt();
-    const QString status = m_pileTable->item(row, 3)->text();
+    const QString status = m_pileTable->item(row, 2)->text();
 
     // 双击仅用于“闲置/在用 → 故障”；故障等待报修、预约占用禁止一切变更
     if (status != QStringLiteral("闲置") && status != QStringLiteral("在用")) {
@@ -298,10 +313,10 @@ void StationMgmtWidget::onPileTableDoubleClicked(int row, int column) {
         return;
     }
 
-    const QString code = m_pileTable->item(row, 1)->text();
+    const QString type = m_pileTable->item(row, 1)->text();
     if (QMessageBox::question(this, QStringLiteral("设为故障"),
                               QStringLiteral("确定将电桩 %1（%2）设为故障吗？")
-                                  .arg(pileId).arg(code),
+                                  .arg(pileId).arg(type),
                               QMessageBox::Yes | QMessageBox::No,
                               QMessageBox::No) != QMessageBox::Yes) {
         return;
@@ -311,8 +326,8 @@ void StationMgmtWidget::onPileTableDoubleClicked(int row, int column) {
 
 void StationMgmtWidget::updatePileButtons() {
     const int row = m_pileTable->currentRow();
-    const bool has = row >= 0 && m_pileTable->item(row, 3);
-    const QString status = has ? m_pileTable->item(row, 3)->text() : QString();
+    const bool has = row >= 0 && m_pileTable->item(row, 2);
+    const QString status = has ? m_pileTable->item(row, 2)->text() : QString();
     // 设故障：闲置/在用；恢复空闲：仅在用；发起报修：仅故障（等待报修的出口）
     m_faultBtn->setEnabled(status == QStringLiteral("闲置")
                            || status == QStringLiteral("在用"));

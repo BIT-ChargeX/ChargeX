@@ -5,8 +5,31 @@
 #include <cmath>
 
 namespace {
-constexpr double kTaperSoc = 80.0;   // SOC 达到此值后开始降功率
-constexpr double kChaseTau = 6.0;    // 功率趋近时间常数(秒)：5s一拍约4个点从0升到~95%额定
+constexpr double kTaperSec = 20.0;   // 剩余该秒数时开始线性降功率
+constexpr double kChaseTau = 6.0;    // 功率趋近时间常数(秒)
+constexpr int kMinChargeSec = 300;   // 单次充电最短时长 5 分钟
+constexpr int kMaxChargeSec = 600;   // 单次充电最长时长 10 分钟
+
+int randomChargeSec() {
+    return kMinChargeSec + QRandomGenerator::global()->bounded(kMaxChargeSec - kMinChargeSec + 1);
+}
+}
+
+void PileModel::beginSession() {
+    m_sessionStartMs = QDateTime::currentMSecsSinceEpoch();
+    m_durationSec = randomChargeSec();
+    m_elapsedSec = 0;
+    m_startSoc = m_soc;
+    m_chargeDone = false;
+    m_curPowerKw = 0.0;   // 从 0 开始爬升
+}
+
+void PileModel::endSession() {
+    m_sessionStartMs = 0;
+    m_durationSec = 0;
+    m_elapsedSec = 0;
+    m_chargeDone = false;
+    m_curPowerKw = 0.0;
 }
 
 void PileModel::setStatic(int pileId, const QString& code, const QString& type,
@@ -18,84 +41,76 @@ void PileModel::setStatic(int pileId, const QString& code, const QString& type,
     m_status = status;
     m_capacityKwh = power >= 50.0 ? 60.0 : 15.0;   // 快充/慢充容量简化
     m_soc = 20.0 + QRandomGenerator::global()->bounded(70);   // 20~90
-    // DB 在用 = 正在充电（会话续跑）：绑定即按当前 SOC 输出目标功率并记录会话起点；
-    // 闲置/故障不输出，等待收到 START/指令
     if (status == QStringLiteral("在用")) {
-        m_curPowerKw = targetPower();
-        m_sessionStartMs = QDateTime::currentMSecsSinceEpoch();
+        // DB 在用 = 会话从此刻开始（终端模拟），时长随机 5~10 分钟
+        beginSession();
     } else {
         m_curPowerKw = 0.0;
         m_sessionStartMs = 0;
+        m_durationSec = 0;
+        m_elapsedSec = 0;
+        m_chargeDone = false;
     }
-}
-
-// 目标功率：SOC<80% → 额定；≥80% 按(100-soc)/(100-80)线性降到 100% 时 0
-double PileModel::targetPower() const {
-    if (m_soc >= 100.0) return 0.0;
-    if (m_soc >= kTaperSoc) {
-        const double factor = (100.0 - m_soc) / (100.0 - kTaperSoc);
-        return m_power * factor;
-    }
-    return m_power;
 }
 
 void PileModel::tick(int seconds) {
     if (m_status != QStringLiteral("在用")) return;
+    if (m_chargeDone) { m_curPowerKw = 0.0; return; }
 
-    // 功率沿目标曲线“指数趋近”：开始从 0 爬升到额定；充满前随 SOC 上升降到 0
-    const double target = targetPower();
-    const double k = seconds / kChaseTau;
-    const double decay = std::exp(-k);
+    m_elapsedSec += seconds;
+    if (m_elapsedSec >= m_durationSec) {
+        m_chargeDone = true;
+        m_soc = 100.0;
+        m_curPowerKw = 0.0;   // 充完 → 功率回落 0，等待结算
+        return;
+    }
+
+    // SOC 随时间线性充到 100%
+    m_soc = qMin(100.0, m_startSoc + (100.0 - m_startSoc) * m_elapsedSec / m_durationSec);
+
+    // 功率：剩余≤20s 线性下降，否则按额定趋近（0→额定爬升）
+    const double remaining = m_durationSec - m_elapsedSec;
+    const double target = remaining <= kTaperSec
+                              ? m_power * remaining / kTaperSec
+                              : m_power;
+    const double decay = std::exp(-seconds / kChaseTau);
     double next = target + (m_curPowerKw - target) * decay;
     if (next < 0.0) next = 0.0;
     m_curPowerKw = next;
 
-    // 稳定阶段（≈额定且未进入降功率区）加 ±3% 微波动，让实时曲线可见
+    // 稳定段 ±3% 微波动
     const double dev = std::fabs(m_curPowerKw - m_power);
-    if (m_soc < kTaperSoc && dev < m_power * 0.05) {
+    if (remaining > kTaperSec && dev < m_power * 0.05) {
         m_curPowerKw = m_power
             * (0.97 + QRandomGenerator::global()->generateDouble() * 0.06);
     }
 
-    const double dt = seconds / 3600.0;
-    m_totalHours += dt;
-    const double kwh = m_curPowerKw * dt;
-    m_soc = qMin(100.0, m_soc + kwh / m_capacityKwh * 100.0);
-    if (m_soc >= 100.0) {
-        m_soc = 100.0;
-        m_curPowerKw = 0.0;   // 充满归 0
-    }
+    m_totalHours += seconds / 3600.0;
 }
 
 void PileModel::forceFault() {
     m_status = QStringLiteral("故障");
-    m_curPowerKw = 0.0;
-    m_sessionStartMs = 0;
+    endSession();
 }
 
 void PileModel::apply(const QString& cmd, const QJsonObject& data) {
     if (cmd == QStringLiteral("START")) {
         m_status = QStringLiteral("在用");
-        m_curPowerKw = 0.0;   // 从 0 开始上升
-        m_sessionStartMs = QDateTime::currentMSecsSinceEpoch();
+        beginSession();
     } else if (cmd == QStringLiteral("STOP")) {
         m_status = QStringLiteral("闲置");
-        m_curPowerKw = 0.0;
-        m_sessionStartMs = 0;
+        endSession();
     } else if (cmd == QStringLiteral("REBOOT")) {
         m_status = QStringLiteral("闲置");
-        m_curPowerKw = 0.0;
-        m_sessionStartMs = 0;
+        endSession();
     } else if (cmd == QStringLiteral("SET_STATUS")) {
         const QString want = data.value("status").toString();
         if (want == QStringLiteral("故障")) {
             m_status = QStringLiteral("故障");
-            m_curPowerKw = 0.0;
-            m_sessionStartMs = 0;
+            endSession();
         } else if (want == QStringLiteral("闲置")) {
             m_status = QStringLiteral("闲置");
-            m_curPowerKw = 0.0;
-            m_sessionStartMs = 0;
+            endSession();
         }
     }
 }
@@ -107,6 +122,7 @@ QJsonObject PileModel::report() const {
     o["soc"] = qRound(m_soc);
     o["cur_power"] = m_curPowerKw;
     o["session_start_ms"] = m_sessionStartMs;
+    o["charge_done"] = m_chargeDone;
     o["total_times"] = m_totalTimes;
     o["total_hours"] = qRound(m_totalHours * 100.0) / 100.0;
     o["ts"] = QDateTime::currentDateTime().toString(Qt::ISODate);

@@ -59,13 +59,13 @@ PileWidget::PileWidget(QWidget* parent) : QWidget(parent) {
 
     auto* pilePanel = new QWidget(splitter);
     auto* pv = new QVBoxLayout(pilePanel);
-    auto* pileTitle = new QLabel(QStringLiteral("电桩列表（所属站 / 编号 / 类型 / 状态 / 累计）"), pilePanel);
+    auto* pileTitle = new QLabel(QStringLiteral("电桩列表（所属站 / 类型 / 状态 / 累计）"), pilePanel);
     pileTitle->setObjectName(QStringLiteral("sectionTitle"));
     pv->addWidget(pileTitle);
     m_pileTable = new QTableWidget(pilePanel);
-    m_pileTable->setColumnCount(9);
+    m_pileTable->setColumnCount(8);
     m_pileTable->setHorizontalHeaderLabels(
-        {QStringLiteral("电桩ID"), QStringLiteral("所属充电站"), QStringLiteral("编号"),
+        {QStringLiteral("电桩ID"), QStringLiteral("所属充电站"),
          QStringLiteral("类型"), QStringLiteral("功率(kW)"), QStringLiteral("状态"),
          QStringLiteral("本次充电时长"), QStringLiteral("累计次数"),
          QStringLiteral("累计时长(h)")});
@@ -158,8 +158,8 @@ void PileWidget::refresh() {
 void PileWidget::updateDurationColumn() {
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     for (int i = 0; i < m_pileTable->rowCount(); ++i) {
-        QTableWidgetItem* durItem = m_pileTable->item(i, 6);
-        QTableWidgetItem* stItem = m_pileTable->item(i, 5);
+        QTableWidgetItem* durItem = m_pileTable->item(i, 5);
+        QTableWidgetItem* stItem = m_pileTable->item(i, 4);
         if (!durItem || !stItem) continue;
         const qint64 start = durItem->data(Qt::UserRole).toLongLong();
         if (stItem->text() == QStringLiteral("在用") && start > 0)
@@ -189,7 +189,6 @@ void PileWidget::loadPiles() {
                 const QStringList cols = {
                     QString::number(pileId),
                     p.value("station").toString(),
-                    p.value("code").toString(),
                     p.value("type").toString(),
                     QString::number(p.value("power").toDouble()),
                     status,
@@ -204,10 +203,10 @@ void PileWidget::loadPiles() {
                 }
                 m_pileTable->item(i, 0)->setData(Qt::UserRole, pileId);
                 // 记录本次充电起点（真实会话 start_time → epoch ms），0 表示无会话
-                m_pileTable->item(i, 6)->setData(
+                m_pileTable->item(i, 5)->setData(
                     Qt::UserRole, p.value("session_start_ms").toVariant().toLongLong());
 
-                QTableWidgetItem* stItem = m_pileTable->item(i, 5);
+                QTableWidgetItem* stItem = m_pileTable->item(i, 4);
                 stItem->setForeground(QBrush(Theme::statusText(status)));
                 stItem->setBackground(QBrush(Theme::statusBackground(status)));
             }
@@ -218,8 +217,8 @@ void PileWidget::loadPiles() {
             if (m_pileTable->currentRow() < 0 && m_pileTable->rowCount() > 0) {
                 int sel = 0;
                 for (int i = 0; i < m_pileTable->rowCount(); ++i) {
-                    if (m_pileTable->item(i, 5)
-                        && m_pileTable->item(i, 5)->text() == QStringLiteral("在用")) {
+                    if (m_pileTable->item(i, 4)
+                        && m_pileTable->item(i, 4)->text() == QStringLiteral("在用")) {
                         sel = i;
                         break;
                     }
@@ -264,7 +263,7 @@ void PileWidget::onReboot() {
         return;
     }
     if (!canRebootRow(row)) {
-        const QString status = m_pileTable->item(row, 5)->text();
+        const QString status = m_pileTable->item(row, 4)->text();
         QMessageBox::information(this, QStringLiteral("远程重启"),
             status == QStringLiteral("故障")
                 ? QStringLiteral("电桩故障等待报修，禁止远程重启，请先线下检修")
@@ -279,7 +278,7 @@ void PileWidget::onRowDoubleClicked(int row, int column) {
     Q_UNUSED(column)
     if (row < 0 || !m_pileTable->item(row, 0)) return;
     if (!canRebootRow(row)) {
-        const QString status = m_pileTable->item(row, 5)->text();
+        const QString status = m_pileTable->item(row, 4)->text();
         QMessageBox::information(this, QStringLiteral("远程重启"),
             status == QStringLiteral("故障")
                 ? QStringLiteral("电桩故障等待报修，禁止远程重启，请先线下检修")
@@ -302,8 +301,8 @@ void PileWidget::updateRebootButton() {
 }
 
 bool PileWidget::canRebootRow(int row) {
-    if (row < 0 || !m_pileTable->item(row, 5)) return false;
-    const QString s = m_pileTable->item(row, 5)->text();
+    if (row < 0 || !m_pileTable->item(row, 4)) return false;
+    const QString s = m_pileTable->item(row, 4)->text();
     // 远程重启仅适用于 闲置/在用；故障等待报修、预约占用不可
     return s == QStringLiteral("闲置") || s == QStringLiteral("在用");
 }
@@ -324,12 +323,7 @@ void PileWidget::loadTrend() {
         return;
     }
 
-    QString code;
-    const int row = m_pileTable->currentRow();
-    if (row >= 0 && m_pileTable->item(row, 2))
-        code = m_pileTable->item(row, 2)->text();
-    m_trendTitle->setText(QStringLiteral("功率曲线（电桩 %1 · %2）")
-                              .arg(pileId).arg(code.isEmpty() ? QStringLiteral("-") : code));
+    m_trendTitle->setText(QStringLiteral("功率曲线（电桩 %1）").arg(pileId));
 
     QJsonObject data;
     AdminSession::instance().attach(data);
