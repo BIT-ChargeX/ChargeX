@@ -270,7 +270,7 @@ Api::Reply UserService::sendCode(const QJsonObject& data) {
     // 演示模式兜底：验证码始终打印到服务端日志
     qInfo().noquote() << "[VerifyCode]" << purpose << email << "验证码:" << code;
 
-    const QString subject = QStringLiteral("【东软充电】邮箱验证码");
+    const QString subject = QStringLiteral("【ChargeX】邮箱验证码");
     const QString body = QStringLiteral("你的验证码是 %1，5 分钟内有效。").arg(code);
     if (SmtpClient::isConfigured() && !SmtpClient::sendPlainText(email, subject, body)) {
         return Api::err(Api::ServerError, QStringLiteral("验证码邮件发送失败，请检查 SMTP 配置"));

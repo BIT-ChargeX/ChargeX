@@ -93,7 +93,7 @@ bool SmtpClient::sendPlainText(const QString& to, const QString& subject,
     if (!sendCmd(s, "DATA\r\n", "354", &err)) { qWarning() << "[Smtp]" << err; return false; }
 
     QByteArray mail;
-    mail += "From: " + from + "\r\n";
+    mail += "From: ChargeX <" + from + ">\r\n";
     mail += "To: " + to.toUtf8() + "\r\n";
     mail += "Subject: " + encodeSubject(subject) + "\r\n";
     mail += "MIME-Version: 1.0\r\n";
