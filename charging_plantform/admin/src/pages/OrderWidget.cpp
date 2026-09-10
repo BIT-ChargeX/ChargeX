@@ -61,7 +61,7 @@ OrderWidget::OrderWidget(QWidget* parent) : QWidget(parent) {
     bar->addSpacing(8);
     bar->addWidget(new QLabel(QStringLiteral("关键字"), this));
     m_keywordEdit = new QLineEdit(this);
-    m_keywordEdit->setPlaceholderText(QStringLiteral("手机号/昵称/桩号/站名"));
+    m_keywordEdit->setPlaceholderText(QStringLiteral("邮箱/昵称/桩号/站名"));
     m_keywordEdit->setMaximumWidth(200);
     bar->addWidget(m_keywordEdit, 1);
 
@@ -95,7 +95,7 @@ OrderWidget::OrderWidget(QWidget* parent) : QWidget(parent) {
     m_table = new QTableWidget(this);
     m_table->setColumnCount(9);
     m_table->setHorizontalHeaderLabels(
-        {QStringLiteral("单号"), QStringLiteral("手机号"), QStringLiteral("昵称"),
+        {QStringLiteral("单号"), QStringLiteral("邮箱号"), QStringLiteral("昵称"),
          QStringLiteral("站点"), QStringLiteral("电桩"), QStringLiteral("类型"),
          QStringLiteral("下单时间"), QStringLiteral("金额"), QStringLiteral("状态")});
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -222,7 +222,7 @@ void OrderWidget::loadOrders(int page) {
                     const QString st = o.value("status").toString();
                     const QStringList cols = {
                         QString::number(o.value("order_id").toInt()),
-                        o.value("phone").toString(),
+                        o.value("email").toString(),
                         o.value("nickname").toString(),
                         o.value("station").toString(),
                         o.value("code").toString(),
@@ -258,11 +258,11 @@ void OrderWidget::onCancelReserved() {
     if (status != kReserved) return;
 
     const int orderId = m_table->item(row, 0)->data(Qt::UserRole).toInt();
-    const QString phone = m_table->item(row, 1)->text();
+    const QString email = m_table->item(row, 1)->text();
     if (QMessageBox::question(this, QStringLiteral("取消预约"),
                               QStringLiteral("确定取消订单 %1（用户 %2）的预约吗？"
                                              "取消后电桩将恢复为空闲。")
-                                  .arg(orderId).arg(phone),
+                                  .arg(orderId).arg(email),
                               QMessageBox::Yes | QMessageBox::No,
                               QMessageBox::No) != QMessageBox::Yes) {
         return;
