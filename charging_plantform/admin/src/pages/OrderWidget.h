@@ -10,7 +10,8 @@ class QPushButton;
 class QTableWidget;
 
 // 管理端“订单管理”页（经 ORDER_MGMT_LIST / ORDER_MGMT_CANCEL）：
-//   分页全量订单查询（状态/关键字/下单日期过滤，手机号脱敏），
+//   分页全量订单查询（状态/关键字/下单日期过滤），
+//   按“单号/邮箱号/昵称/站点/电桩/类型/下单时间/金额/状态”展示订单快照，
 //   仅可“取消预约占用”订单（服务端释放电桩并审计），双击行查看详情。
 class OrderWidget : public QWidget {
     Q_OBJECT

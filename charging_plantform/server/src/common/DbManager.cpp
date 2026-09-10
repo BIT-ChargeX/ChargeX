@@ -58,8 +58,10 @@ void DbManager::init(const QString& dbPath) {
     ensurePasswordColumn(db);   // 兼容旧库：给 users 表补 password 列
     ensureReservePenaltyColumn(db);   // 兼容旧库：补预约超时处罚计数列
     ensureOrdersEnergyColumn(db);      // 兼容旧库：给 orders 表补 energy_kwh 列
+    ensureOrderSnapshotColumns(db);   // 兼容旧库：给 orders 表补快照列（邮箱/昵称/站点/桩号/类型）
     seedDemo(db);
     backfillOrderEnergy(db);           // 回填历史已完成订单电量（含演示订单）
+    backfillOrderSnapshot(db);         // 回填历史订单快照字段（含演示订单）
 }
 
 // 为 piles 表补充“实时遥测”列（充电桩终端上报字段）；幂等，老库无需重建
@@ -135,6 +137,50 @@ void DbManager::ensureOrdersEnergyColumn(QSqlDatabase db) {
     }
 }
 
+// 兼容旧库迁移：orders 表若缺少快照列则补上。
+// 快照列在下单时写入邮箱/昵称/站点/桩号/类型，管理端订单表按“单号/邮箱/昵称/站点/电桩/类型”直接读取。
+void DbManager::ensureOrderSnapshotColumns(QSqlDatabase db) {
+    QSet<QString> cols;
+    {
+        QSqlQuery q(db);
+        q.exec(QStringLiteral("PRAGMA table_info(orders);"));
+        while (q.next()) cols.insert(q.value(1).toString());
+    }
+    struct Add { const char* name; const char* ddl; };
+    const Add adds[] = {
+        {"user_email",    "ALTER TABLE orders ADD COLUMN user_email VARCHAR(128) NOT NULL DEFAULT ''"},
+        {"user_nickname", "ALTER TABLE orders ADD COLUMN user_nickname VARCHAR(32) NOT NULL DEFAULT ''"},
+        {"station_name",  "ALTER TABLE orders ADD COLUMN station_name VARCHAR(64) NOT NULL DEFAULT ''"},
+        {"pile_code",     "ALTER TABLE orders ADD COLUMN pile_code VARCHAR(32) NOT NULL DEFAULT ''"},
+        {"pile_type",     "ALTER TABLE orders ADD COLUMN pile_type VARCHAR(8) NOT NULL DEFAULT ''"},
+    };
+    QSqlQuery q(db);
+    for (const auto& a : adds) {
+        if (cols.contains(QString::fromLatin1(a.name))) continue;
+        if (!q.exec(QString::fromLatin1(a.ddl))) {
+            qWarning() << "[DbManager] 添加" << a.name << "列失败:" << q.lastError().text();
+        }
+    }
+}
+
+// 回填历史订单的快照字段（仅补空值，保留已有快照；含演示订单）。幂等。
+void DbManager::backfillOrderSnapshot(QSqlDatabase db) {
+    QSqlQuery q(db);
+    if (!q.exec(QStringLiteral(R"SQL(
+        UPDATE orders SET
+            user_email = COALESCE((SELECT u.email FROM users u WHERE u.user_id = orders.user_id), ''),
+            user_nickname = COALESCE((SELECT u.nickname FROM users u WHERE u.user_id = orders.user_id), ''),
+            pile_code = COALESCE((SELECT p.code FROM piles p WHERE p.pile_id = orders.pile_id), ''),
+            pile_type = COALESCE((SELECT p.type FROM piles p WHERE p.pile_id = orders.pile_id), ''),
+            station_name = COALESCE(
+                (SELECT s.name FROM stations s
+                 JOIN piles p ON p.station_id = s.station_id
+                 WHERE p.pile_id = orders.pile_id), '')
+        WHERE orders.user_email = '';)SQL"))) {
+        qWarning() << "[DbManager] 回填订单快照字段失败:" << q.lastError().text();
+    }
+}
+
 // 回填历史「已完成」订单的结算电量，口径与结算计费一致（充电时长下限0.2h、上限12h），
 // 使碳积分明细与历史订单一一对应。幂等：仅更新尚无电量的已完成订单。
 void DbManager::backfillOrderEnergy(QSqlDatabase db) {
@@ -196,11 +242,17 @@ void DbManager::createSchema(QSqlDatabase db) {
                 total_hours   DECIMAL(10,2) NOT NULL DEFAULT 0
             );)SQL"),
         // 充电订单表（预约/充电/结算共用一张表，靠 status 区分）
+        // 快照列（user_email/.../pile_type）在下单时写入，管理端按“单号/邮箱/昵称/站点/电桩/类型”直接展示
         QStringLiteral(R"SQL(
             CREATE TABLE IF NOT EXISTS orders (
                 order_id      INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id       INTEGER NOT NULL REFERENCES users(user_id),
                 pile_id       INTEGER NOT NULL REFERENCES piles(pile_id),
+                user_email    VARCHAR(128) NOT NULL DEFAULT '',
+                user_nickname VARCHAR(32)  NOT NULL DEFAULT '',
+                station_name  VARCHAR(64)  NOT NULL DEFAULT '',
+                pile_code     VARCHAR(32)  NOT NULL DEFAULT '',
+                pile_type     VARCHAR(8)   NOT NULL DEFAULT '',
                 reserve_time  DATETIME,
                 start_time    DATETIME,
                 end_time      DATETIME,
