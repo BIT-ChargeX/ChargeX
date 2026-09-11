@@ -44,6 +44,10 @@ bool NetClient::isConnected() const {
     return state() == State::Connected;
 }
 
+QString NetClient::host() const {
+    return m_host;
+}
+
 void NetClient::emitStateChanged() {
     emit stateChanged(static_cast<int>(state()));
 }
