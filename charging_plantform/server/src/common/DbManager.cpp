@@ -40,7 +40,10 @@ QSqlDatabase DbManager::threadDb() {
             qWarning() << "[DbManager] open failed:" << db.lastError().text();
         }
         QSqlQuery q(db);
-        q.exec(QStringLiteral("PRAGMA busy_timeout = 3000;"));
+        q.exec(QStringLiteral("PRAGMA busy_timeout = 10000;"));
+        // WAL 模式下 NORMAL 仅在 checkpoint 时 fsync，大幅缩短每次写锁持有时间，
+        // 缓解多线程并发写时的 "database is locked"。
+        q.exec(QStringLiteral("PRAGMA synchronous = NORMAL;"));
     }
     return db;
 }

@@ -189,7 +189,7 @@ void ProfileWidget::applySession() {
     const QString& avatar = s.avatar();
     if (avatar.startsWith(QStringLiteral("http://"))
         || avatar.startsWith(QStringLiteral("https://"))) {
-        downloadAvatar(avatar);
+        downloadAvatar(resolveAvatarUrl(avatar));
     } else {
         QPixmap pm;
         if (!avatar.isEmpty() && pm.load(avatar)) {
@@ -202,6 +202,22 @@ void ProfileWidget::applySession() {
     m_nicknameEdit->setText(s.nickname());
     m_balanceLabel->setText(QStringLiteral("¥%1").arg(s.balance(), 0, 'f', 2));
     m_pendingAvatarPath.clear();
+}
+
+QString ProfileWidget::resolveAvatarUrl(const QString& url) {
+    // 服务端默认把头像 URL 存成 http://localhost:9010/...，远程客户端无法用
+    // 本机 localhost 访问 MinIO；这里把 localhost 替换为当前连接的服务端主机。
+    QUrl u(url);
+    const QString h = u.host();
+    if (h == QStringLiteral("localhost") || h == QStringLiteral("127.0.0.1")
+        || h == QStringLiteral("::1")) {
+        const QString serverHost = NetClient::instance().host();
+        if (!serverHost.isEmpty() && serverHost != h) {
+            u.setHost(serverHost);
+            return u.toString();
+        }
+    }
+    return url;
 }
 
 void ProfileWidget::downloadAvatar(const QString& url) {

@@ -21,6 +21,7 @@ public:
 
     State state() const;
     bool isConnected() const;
+    QString host() const;   // 当前连接的服务端主机名/IP，供头像 URL 本地化重写
 
     using ResponseCallback =
         std::function<void(const QJsonObject& data, int code, const QString& msg)>;

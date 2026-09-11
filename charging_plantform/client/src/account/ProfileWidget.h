@@ -38,6 +38,7 @@ private slots:
 private:
     void applySession();
     void downloadAvatar(const QString& url);
+    QString resolveAvatarUrl(const QString& url);
     void resetEcoFootprint();
 
     QLabel* m_avatarLabel;
