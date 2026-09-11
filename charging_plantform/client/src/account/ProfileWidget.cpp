@@ -14,7 +14,10 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QPixmap>
+#include <QImage>
+#include <QBuffer>
 #include <QPainter>
+#include <QPainterPath>
 #include <QBrush>
 #include <QColor>
 #include <QJsonObject>
@@ -25,6 +28,19 @@
 #include <QUrl>
 
 namespace {
+
+// 头像统一规格：固定正方形尺寸（像素）
+constexpr int kAvatarSize = 256;
+
+// 中心裁剪为正方形并缩放到固定尺寸，保证不同比例图片统一格式
+QImage normalizeAvatar(const QImage& src) {
+    const int side = qMin(src.width(), src.height());
+    const int x = (src.width() - side) / 2;
+    const int y = (src.height() - side) / 2;
+    return src.copy(x, y, side, side)
+              .scaled(kAvatarSize, kAvatarSize,
+                      Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+}
 
 // 生成默认灰色头像
 QPixmap defaultAvatarPixmap(int size = 96) {
@@ -145,8 +161,26 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
 }
 
 void ProfileWidget::setAvatarPixmap(const QPixmap& pm) {
-    m_avatarLabel->setPixmap(pm.scaled(m_avatarLabel->size(),
-                                       Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    const QSize sz = m_avatarLabel->size();
+    if (sz.isEmpty()) {
+        m_avatarLabel->setPixmap(pm);
+        return;
+    }
+
+    const QPixmap scaled = pm.scaled(sz, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+    // 统一渲染为圆形头像，居中裁剪
+    QPixmap out(sz);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing);
+    QPainterPath clip;
+    clip.addEllipse(0, 0, sz.width(), sz.height());
+    p.setClipPath(clip);
+    const int dx = (sz.width() - scaled.width()) / 2;
+    const int dy = (sz.height() - scaled.height()) / 2;
+    p.drawPixmap(dx, dy, scaled);
+    m_avatarLabel->setPixmap(out);
 }
 
 void ProfileWidget::applySession() {
@@ -285,27 +319,32 @@ void ProfileWidget::onChooseAvatar() {
         return;
     }
 
-    QPixmap pm(path);
-    if (pm.isNull()) {
+    QImage img(path);
+    if (img.isNull()) {
         m_hintLabel->setText(QStringLiteral("图片加载失败"));
         return;
     }
-    m_pendingAvatarPath = path;
-    setAvatarPixmap(pm);
 
-    // 读取文件字节 -> base64 -> 上传 MinIO 对象存储，换取跨设备可访问的公开 URL
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        m_hintLabel->setText(QStringLiteral("图片读取失败"));
+    // 中心裁剪为正方形并缩放到固定尺寸，统一为固定格式
+    const QImage normalized = normalizeAvatar(img);
+
+    // 编码为固定 PNG 格式
+    QByteArray png;
+    QBuffer buf(&png);
+    buf.open(QIODevice::WriteOnly);
+    if (!normalized.save(&buf, "PNG")) {
+        m_hintLabel->setText(QStringLiteral("图片处理失败"));
         return;
     }
-    const QByteArray bytes = file.readAll();
-    file.close();
 
+    m_pendingAvatarPath = path;
+    setAvatarPixmap(QPixmap::fromImage(normalized));
+
+    // 上传处理后的固定尺寸图片 -> base64 -> MinIO，换取跨设备可访问的公开 URL
     QJsonObject data;
     data["user_id"] = AppSession::instance().userId();
-    data["file_name"] = QFileInfo(path).fileName();
-    data["data_b64"] = QString::fromLatin1(bytes.toBase64());
+    data["file_name"] = QStringLiteral("avatar.png");
+    data["data_b64"] = QString::fromLatin1(png.toBase64());
 
     NetClient::instance().sendRequest(Api::CmdAvatarUpload, data,
         [this](const QJsonObject& resp, int code, const QString& msg) {
