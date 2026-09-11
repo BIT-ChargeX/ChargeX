@@ -34,12 +34,14 @@ private slots:
     void onLoggedOut();
     void onPointsClicked();
     void onOrdersClicked();
+    void onCouponsClicked();
 
 private:
     void applySession();
     void downloadAvatar(const QString& url);
     QString resolveAvatarUrl(const QString& url);
     void resetEcoFootprint();
+    void refreshCoupons();
 
     QLabel* m_avatarLabel;
     QLabel* m_emailLabel;
@@ -57,6 +59,7 @@ private:
     QLabel* m_levelLabel;
     QPushButton* m_pointsBtn;
     QPushButton* m_ordersBtn;
+    QPushButton* m_couponsBtn;
 
     PointsWidget* m_pointsWidget;
     OrderListWidget* m_orderList;

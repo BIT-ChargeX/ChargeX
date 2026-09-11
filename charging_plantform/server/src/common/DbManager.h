@@ -24,6 +24,12 @@ private:
     static void ensureReservePenaltyColumn(QSqlDatabase db);
     static void ensureOrdersEnergyColumn(QSqlDatabase db);
     static void backfillOrderEnergy(QSqlDatabase db);
+<<<<<<< Updated upstream
+=======
+    static void ensureOrderSnapshotColumns(QSqlDatabase db);
+    static void backfillOrderSnapshot(QSqlDatabase db);
+    static void ensureRedemptionCouponColumns(QSqlDatabase db);
+>>>>>>> Stashed changes
     static void seedDemo(QSqlDatabase db);
 
     static QString s_path;

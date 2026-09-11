@@ -23,6 +23,7 @@ inline constexpr const char* CmdUserRechargeRecords= "USER_RECHARGE_RECORDS"; //
 inline constexpr const char* CmdUserCarbonStats    = "USER_CARBON_STATS";    // 碳积分与环保足迹
 inline constexpr const char* CmdUserPointsDetail   = "USER_POINTS_DETAIL";   // 积分明细列表
 inline constexpr const char* CmdUserPointsRedeem   = "USER_POINTS_REDEEM";   // 积分兑换
+inline constexpr const char* CmdUserCoupons        = "USER_COUPONS";         // 优惠券列表（可用/已用）
 // 充电站 / 电桩查询
 inline constexpr const char* CmdStationNearby      = "STATION_NEARBY";
 inline constexpr const char* CmdStationDetail      = "STATION_DETAIL";

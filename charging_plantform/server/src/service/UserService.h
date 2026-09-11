@@ -17,5 +17,6 @@ Api::Reply getBalance(const QJsonObject& data);
 Api::Reply carbonStats(const QJsonObject& data);   // 碳积分与环保足迹
 Api::Reply pointsDetail(const QJsonObject& data);  // 积分明细列表
 Api::Reply redeemPoints(const QJsonObject& data);  // 积分兑换
+Api::Reply listCoupons(const QJsonObject& data);   // 优惠券列表（USER_COUPONS）
 
 }

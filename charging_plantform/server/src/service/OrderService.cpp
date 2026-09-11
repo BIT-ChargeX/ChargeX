@@ -32,6 +32,33 @@ QString maskPhone(const QString& phone) {
     return phone;
 }
 
+// 校验并返回优惠券可抵扣金额；不可用返回 <0 且通过 errMsg 给出原因。
+// 仅在确实产生费用（amount > 0）时才应调用。
+double loadCouponDiscount(QSqlDatabase& db, int userId, int redeemId, double amount, QString* errMsg) {
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT balance_credit, threshold, used FROM points_redemption "
+        "WHERE redeem_id = ? AND user_id = ? AND item_type = ?;"));
+    q.addBindValue(redeemId);
+    q.addBindValue(userId);
+    q.addBindValue(QStringLiteral("coupon"));
+    if (!q.exec() || !q.next()) {
+        if (errMsg) *errMsg = QStringLiteral("优惠券不存在");
+        return -1.0;
+    }
+    const double value = q.value(0).toDouble();
+    const double threshold = q.value(1).toDouble();
+    if (q.value(2).toInt() != 0) {
+        if (errMsg) *errMsg = QStringLiteral("优惠券已被使用");
+        return -1.0;
+    }
+    if (amount + 1e-9 < threshold) {
+        if (errMsg) *errMsg = QStringLiteral("未满足满 %1 元的使用条件").arg(threshold, 0, 'f', 2);
+        return -1.0;
+    }
+    return qMin(value, amount);
+}
+
 } // namespace
 
 // 扫描所有“预约占用”订单：时段结束仍未开充 → 标记“已超时”、释放电桩、给用户施加处罚。
@@ -319,6 +346,7 @@ Api::Reply OrderService::create(const QJsonObject& data) {
 Api::Reply OrderService::settle(const QJsonObject& data) {
     const int userId = data.value("user_id").toInt();
     int orderId = data.value("order_id").toInt();
+    const int redeemId = data.value("redeem_id").toInt();
     if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
 
     QSqlDatabase db = DbManager::threadDb();
@@ -392,6 +420,7 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
         return Api::okData(out);
     }
 
+<<<<<<< Updated upstream
     // 模拟计费：充电时长 = 距开始时间（下限0.2h，上限12h）
     double hours = 1.0;
     QDateTime startDt = QDateTime::fromString(startText, Qt::ISODate);
@@ -406,15 +435,44 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     if (balance + 1e-9 < amount) {
         return Api::err(Api::StateConflict,
                         QStringLiteral("余额不足（本次需 ¥%1），请先充值").arg(amount, 0, 'f', 2));
+=======
+    // 优惠券抵扣：仅实际产生费用时可用
+    double discount = 0.0;
+    if (redeemId > 0 && ctx.amount > 0.0) {
+        QString err;
+        discount = loadCouponDiscount(db, userId, redeemId, ctx.amount, &err);
+        if (discount < 0.0) return Api::err(Api::StateConflict, err);
+    }
+    const double payAmount = qMax(0.0, ctx.amount - discount);
+
+    if (ctx.balance + 1e-9 < payAmount) {
+        return Api::err(Api::StateConflict,
+                        QStringLiteral("余额不足（本次需 ¥%1），请先充值").arg(payAmount, 0, 'f', 2));
+>>>>>>> Stashed changes
     }
 
     db.transaction();
+
+    // 标记优惠券已使用（并发下仅首个成功占用该券）
+    if (redeemId > 0) {
+        QSqlQuery cu(db);
+        cu.prepare(QStringLiteral("UPDATE points_redemption SET used = 1 WHERE redeem_id = ? AND used = 0;"));
+        cu.addBindValue(redeemId);
+        if (!cu.exec() || cu.numRowsAffected() == 0) {
+            db.rollback();
+            return Api::err(Api::StateConflict, QStringLiteral("优惠券已被使用"));
+        }
+    }
 
     QSqlQuery upd(db);
     upd.prepare(QStringLiteral(R"SQL(
         UPDATE orders SET status = '已完成', amount = ?, end_time = ?, energy_kwh = ?
         WHERE order_id = ?;)SQL"));
+<<<<<<< Updated upstream
     upd.addBindValue(amount);
+=======
+    upd.addBindValue(payAmount);
+>>>>>>> Stashed changes
     upd.addBindValue(now);
     upd.addBindValue(energyKwh);
     upd.addBindValue(orderId);
@@ -425,7 +483,11 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
 
     QSqlQuery bal(db);
     bal.prepare(QStringLiteral("UPDATE users SET balance = balance - ? WHERE user_id = ?;"));
+<<<<<<< Updated upstream
     bal.addBindValue(amount);
+=======
+    bal.addBindValue(payAmount);
+>>>>>>> Stashed changes
     bal.addBindValue(userId);
     bal.exec();
 
@@ -451,7 +513,11 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     DeviceRegistry::instance().enqueue(pileId, DeviceCmd::kStop,
                                        QJsonObject{{"order_id", orderId}});
 
+<<<<<<< Updated upstream
     double newBalance = balance - amount;
+=======
+    double newBalance = ctx.balance - payAmount;
+>>>>>>> Stashed changes
     {
         QSqlQuery sel(db);
         sel.prepare(QStringLiteral("SELECT balance FROM users WHERE user_id = ?;"));
@@ -462,8 +528,48 @@ Api::Reply OrderService::settle(const QJsonObject& data) {
     QJsonObject out;
     out["order_id"] = orderId;
     out["status"] = QString(Api::OrderStatus::kDone);
+<<<<<<< Updated upstream
     out["amount"] = amount;
     out["balance"] = newBalance;
+=======
+    out["amount"] = payAmount;       // 实付金额
+    out["discount"] = discount;      // 优惠券抵扣金额
+    out["balance"] = newBalance;
+    out["energy"] = ctx.energyKwh;
+    return Api::okData(out);
+}
+
+// ORDER_SETTLE_PREVIEW：只读预估本次结算金额（不扣费、不改任何状态），供客户端结算前展示
+Api::Reply OrderService::settlePreview(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    int orderId = data.value("order_id").toInt();
+    const int redeemId = data.value("redeem_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    SettleContext ctx;
+    const Api::Reply prep = loadSettleContext(db, userId, orderId, ctx);
+    if (prep.code != Api::Ok) return prep;
+
+    double discount = 0.0;
+    if (redeemId > 0 && ctx.amount > 0.0) {
+        QString err;
+        discount = loadCouponDiscount(db, userId, redeemId, ctx.amount, &err);
+        if (discount < 0.0) return Api::err(Api::StateConflict, err);
+    }
+    const double payAmount = qMax(0.0, ctx.amount - discount);
+
+    QJsonObject out;
+    out["order_id"] = ctx.orderId;
+    out["status"] = ctx.status;
+    out["amount"] = ctx.amount;       // 原价
+    out["discount"] = discount;       // 优惠券抵扣金额
+    out["pay_amount"] = payAmount;    // 实付金额
+    out["energy"] = ctx.energyKwh;
+    out["balance"] = ctx.balance;
+    out["price"] = ctx.price;
+    out["start_time"] = ctx.startText;
+>>>>>>> Stashed changes
     return Api::okData(out);
 }
 

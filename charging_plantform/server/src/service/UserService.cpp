@@ -97,18 +97,19 @@ int spentPoints(QSqlDatabase& db, int userId) {
 struct RedeemItem {
     QString id;
     QString name;
-    QString type;   // "coupon" 优惠券 / "deduct" 抵扣充电费用(转余额)
-    int cost;       // 所需积分
-    double value;   // 面值/抵扣金额（元）
+    QString type;       // "coupon" 优惠券 / "deduct" 抵扣充电费用(转余额)
+    int cost;           // 所需积分
+    double value;       // 面值/抵扣金额（元）
+    double threshold;   // 优惠券满减门槛（元），抵扣类为 0
 };
 
 const RedeemItem* findRedeemItem(const QString& id) {
     static const RedeemItem items[] = {
-        {QStringLiteral("coupon_5"),  QStringLiteral("满10减5元优惠券"),  QStringLiteral("coupon"), 100, 5.0},
-        {QStringLiteral("coupon_10"), QStringLiteral("满20减10元优惠券"), QStringLiteral("coupon"), 200, 10.0},
-        {QStringLiteral("coupon_30"), QStringLiteral("满50减30元优惠券"), QStringLiteral("coupon"), 500, 30.0},
-        {QStringLiteral("deduct_5"),  QStringLiteral("充电费抵扣 ¥5"),   QStringLiteral("deduct"), 100, 5.0},
-        {QStringLiteral("deduct_20"), QStringLiteral("充电费抵扣 ¥20"),  QStringLiteral("deduct"), 400, 20.0},
+        {QStringLiteral("coupon_5"),  QStringLiteral("满10减5元优惠券"),  QStringLiteral("coupon"), 100, 5.0,  10.0},
+        {QStringLiteral("coupon_10"), QStringLiteral("满20减10元优惠券"), QStringLiteral("coupon"), 200, 10.0, 20.0},
+        {QStringLiteral("coupon_30"), QStringLiteral("满50减30元优惠券"), QStringLiteral("coupon"), 500, 30.0, 50.0},
+        {QStringLiteral("deduct_5"),  QStringLiteral("充电费抵扣 ¥5"),   QStringLiteral("deduct"), 100, 5.0,  0.0},
+        {QStringLiteral("deduct_20"), QStringLiteral("充电费抵扣 ¥20"),  QStringLiteral("deduct"), 400, 20.0, 0.0},
     };
     for (const auto& it : items) {
         if (it.id == id) return &it;
@@ -615,14 +616,16 @@ Api::Reply UserService::redeemPoints(const QJsonObject& data) {
 
     QSqlQuery ins(db);
     ins.prepare(QStringLiteral(
-        "INSERT INTO points_redemption (user_id, points, item_id, item_name, item_type, balance_credit) "
-        "VALUES (?,?,?,?,?,?);"));
+        "INSERT INTO points_redemption (user_id, points, item_id, item_name, item_type, balance_credit, threshold) "
+        "VALUES (?,?,?,?,?,?,?);"));
     ins.addBindValue(userId);
     ins.addBindValue(item->cost);
     ins.addBindValue(item->id);
     ins.addBindValue(item->name);
     ins.addBindValue(item->type);
-    ins.addBindValue(isDeduct ? item->value : 0.0);
+    // balance_credit：抵扣类=已转余额金额，优惠券=可抵扣金额（面值）
+    ins.addBindValue(item->value);
+    ins.addBindValue(item->threshold);
     if (!ins.exec()) {
         db.rollback();
         return Api::err(Api::ServerError, ins.lastError().text());
@@ -646,5 +649,38 @@ Api::Reply UserService::redeemPoints(const QJsonObject& data) {
     out["redeem_id"] = redeemId;
     out["item_name"] = item->name;
     out["balance"]   = newBalance;
+    return Api::okData(out);
+}
+
+// 【优惠券】列出用户全部优惠券（item_type='coupon'），含可用/已用状态，供 profile 与结算页展示
+Api::Reply UserService::listCoupons(const QJsonObject& data) {
+    const int userId = data.value("user_id").toInt();
+    if (userId <= 0) return Api::err(Api::InvalidParam, QStringLiteral("缺少 user_id"));
+
+    QSqlDatabase db = DbManager::threadDb();
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT redeem_id, item_id, item_name, balance_credit, threshold, used, created_at "
+        "FROM points_redemption WHERE user_id = ? AND item_type = ? "
+        "ORDER BY redeem_id ASC;"));
+    q.addBindValue(userId);
+    q.addBindValue(QStringLiteral("coupon"));
+    if (!q.exec()) return Api::err(Api::ServerError, q.lastError().text());
+
+    QJsonArray coupons;
+    while (q.next()) {
+        QJsonObject o;
+        o["redeem_id"]  = q.value(0).toInt();
+        o["item_id"]    = q.value(1).toString();
+        o["item_name"]  = q.value(2).toString();
+        o["value"]      = q.value(3).toDouble();
+        o["threshold"]  = q.value(4).toDouble();
+        o["used"]       = q.value(5).toInt();
+        o["created_at"] = fmtTime(q.value(6).toString());
+        coupons.append(o);
+    }
+
+    QJsonObject out;
+    out["coupons"] = coupons;
     return Api::okData(out);
 }

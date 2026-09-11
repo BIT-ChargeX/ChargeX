@@ -61,8 +61,33 @@ void DbManager::init(const QString& dbPath) {
     ensurePasswordColumn(db);   // 兼容旧库：给 users 表补 password 列
     ensureReservePenaltyColumn(db);   // 兼容旧库：补预约超时处罚计数列
     ensureOrdersEnergyColumn(db);      // 兼容旧库：给 orders 表补 energy_kwh 列
+<<<<<<< Updated upstream
+=======
+    ensureOrderSnapshotColumns(db);   // 兼容旧库：给 orders 表补快照列（邮箱/昵称/站点/桩号/类型）
+    ensureRedemptionCouponColumns(db); // 兼容旧库：给 points_redemption 表补优惠券 threshold/used 列
+>>>>>>> Stashed changes
     seedDemo(db);
     backfillOrderEnergy(db);           // 回填历史已完成订单电量（含演示订单）
+}
+
+// 兼容旧库迁移：points_redemption 表若缺少 threshold/used 列则补上。
+// threshold=优惠券满减门槛（元），used=是否已使用（0 可用 / 1 已用）。
+void DbManager::ensureRedemptionCouponColumns(QSqlDatabase db) {
+    bool hasThreshold = false, hasUsed = false;
+    {
+        QSqlQuery q(db);
+        q.exec(QStringLiteral("PRAGMA table_info(points_redemption);"));
+        while (q.next()) {
+            const QString c = q.value(1).toString();
+            if (c == QStringLiteral("threshold")) hasThreshold = true;
+            else if (c == QStringLiteral("used")) hasUsed = true;
+        }
+    }
+    QSqlQuery q(db);
+    if (!hasThreshold)
+        q.exec(QStringLiteral("ALTER TABLE points_redemption ADD COLUMN threshold DECIMAL(10,2) NOT NULL DEFAULT 0;"));
+    if (!hasUsed)
+        q.exec(QStringLiteral("ALTER TABLE points_redemption ADD COLUMN used INTEGER NOT NULL DEFAULT 0;"));
 }
 
 // 为 piles 表补充“实时遥测”列（充电桩终端上报字段）；幂等，老库无需重建
@@ -270,6 +295,8 @@ void DbManager::createSchema(QSqlDatabase db) {
                 item_name      VARCHAR(64) DEFAULT '',
                 item_type      VARCHAR(16) DEFAULT 'coupon',
                 balance_credit DECIMAL(10,2) NOT NULL DEFAULT 0,
+                threshold      DECIMAL(10,2) NOT NULL DEFAULT 0,
+                used           INTEGER NOT NULL DEFAULT 0,
                 created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );)SQL"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_redemption_user ON points_redemption(user_id);"),

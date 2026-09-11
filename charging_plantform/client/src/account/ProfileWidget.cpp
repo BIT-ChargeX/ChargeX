@@ -21,6 +21,8 @@
 #include <QBrush>
 #include <QColor>
 #include <QJsonObject>
+#include <QJsonArray>
+#include <QStringList>
 #include <QMessageBox>
 #include <QFile>
 #include <QNetworkAccessManager>
@@ -132,6 +134,11 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
     m_ordersBtn->setObjectName(QStringLiteral("rowBtn"));
     layout->addWidget(m_ordersBtn);
 
+    // 我的优惠券：实时查看可用优惠券数量与明细
+    m_couponsBtn = new QPushButton(QStringLiteral("我的优惠券：-- 张  ›"), this);
+    m_couponsBtn->setObjectName(QStringLiteral("rowBtn"));
+    layout->addWidget(m_couponsBtn);
+
     m_hintLabel = new QLabel(this);
     m_hintLabel->setStyleSheet(QStringLiteral("color: #d9534f;"));
     m_hintLabel->setWordWrap(true);
@@ -153,6 +160,7 @@ ProfileWidget::ProfileWidget(QWidget* parent) : QWidget(parent) {
     connect(m_logoutBtn, &QPushButton::clicked, this, &ProfileWidget::onLogoutClicked);
     connect(m_pointsBtn, &QPushButton::clicked, this, &ProfileWidget::onPointsClicked);
     connect(m_ordersBtn, &QPushButton::clicked, this, &ProfileWidget::onOrdersClicked);
+    connect(m_couponsBtn, &QPushButton::clicked, this, &ProfileWidget::onCouponsClicked);
     connect(m_orderList, &OrderListWidget::settleRequested, this, &ProfileWidget::settleRequested);
 
     connect(&AppSession::instance(), &AppSession::balanceChanged, this, &ProfileWidget::onBalanceChanged);
@@ -254,6 +262,7 @@ void ProfileWidget::resetEcoFootprint() {
     m_treesLabel->setText(QStringLiteral("--"));
     m_levelLabel->setText(QStringLiteral("--"));
     m_pointsBtn->setText(QStringLiteral("碳积分：-- 分  ›"));
+    m_couponsBtn->setText(QStringLiteral("我的优惠券：-- 张  ›"));
 }
 
 void ProfileWidget::onPointsClicked() {
@@ -270,6 +279,57 @@ void ProfileWidget::onOrdersClicked() {
     m_orderList->show();
     m_orderList->raise();
     m_orderList->activateWindow();
+}
+
+void ProfileWidget::refreshCoupons() {
+    if (!AppSession::instance().isLoggedIn()) return;
+
+    QJsonObject data;
+    data["user_id"] = AppSession::instance().userId();
+
+    NetClient::instance().sendRequest(Api::CmdUserCoupons, data,
+        [this](const QJsonObject& resp, int code, const QString& /*msg*/) {
+            if (code != 0) return;
+            int available = 0;
+            const QJsonArray coupons = resp.value("coupons").toArray();
+            for (const auto& v : coupons) {
+                if (v.toObject().value("used").toInt() == 0) ++available;
+            }
+            m_couponsBtn->setText(QStringLiteral("我的优惠券：%1 张  ›").arg(available));
+        });
+}
+
+void ProfileWidget::onCouponsClicked() {
+    if (!AppSession::instance().isLoggedIn()) return;
+
+    QJsonObject data;
+    data["user_id"] = AppSession::instance().userId();
+
+    NetClient::instance().sendRequest(Api::CmdUserCoupons, data,
+        [this](const QJsonObject& resp, int code, const QString& /*msg*/) {
+            QStringList lines;
+            if (code != 0) {
+                lines << QStringLiteral("加载失败，请稍后重试");
+            } else {
+                const QJsonArray coupons = resp.value("coupons").toArray();
+                for (const auto& v : coupons) {
+                    const QJsonObject c = v.toObject();
+                    const double value = c.value("value").toDouble();
+                    const double threshold = c.value("threshold").toDouble();
+                    const bool used = c.value("used").toInt() != 0;
+                    lines << QStringLiteral("%1：满%2减%3元%4")
+                                 .arg(c.value("item_name").toString())
+                                 .arg(threshold, 0, 'f', 2)
+                                 .arg(value, 0, 'f', 2)
+                                 .arg(used ? QStringLiteral("（已使用）")
+                                           : QStringLiteral("（可用）"));
+                }
+                if (lines.isEmpty())
+                    lines << QStringLiteral("暂无优惠券，可去「碳积分」页用积分兑换");
+            }
+            QMessageBox::information(this, QStringLiteral("我的优惠券"),
+                                     lines.join(QStringLiteral("\n")));
+        });
 }
 
 void ProfileWidget::refreshOrders() {
@@ -304,6 +364,8 @@ void ProfileWidget::refresh() {
             m_levelLabel->setText(level);
             m_pointsBtn->setText(QStringLiteral("碳积分：%1 分  ›").arg(points));
         });
+
+    refreshCoupons();
 }
 
 void ProfileWidget::onBalanceChanged(double balance) {
